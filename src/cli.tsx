@@ -150,6 +150,7 @@ program
   .option("--url <url>", "Link to release/changelog")
   .option("--tone <tone>", "Tone: professional, casual, excited (default: casual)")
   .option("--template <type>", "Template: release, feature, bugfix, update (default: auto-detect)")
+  .option("--verbosity <level>", "Content verbosity: brief, normal, detailed (default: normal)")
   .option("--image <paths...>", "Image file path(s) to attach")
   .option("--only <platforms>", "Post to specific platforms only (comma-separated)", (v) => v.split(","))
   .option("--exclude <platforms>", "Skip specific platforms (comma-separated)", (v) => v.split(","))

@@ -12,6 +12,7 @@ import {
   type AnnounceContext,
   type Tone,
   type TemplateType,
+  type Verbosity,
 } from "../core/announce-templates.js";
 import { PostSummary } from "../ui/PostSummary.js";
 import { ErrorBox } from "../ui/ErrorBox.js";
@@ -46,6 +47,7 @@ export interface AnnounceCommandOptions {
   url?: string;
   tone?: string;
   template?: string;
+  verbosity?: string;
   only?: string[];
   exclude?: string[];
   dryRun?: boolean;
@@ -282,7 +284,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         return;
       }
 
-      const texts = generateAllPlatforms(context, adapters);
+      const verbosity = (options.verbosity as Verbosity) ?? undefined;
+      const texts = generateAllPlatforms(context, adapters, verbosity);
       setGeneratedTexts(texts);
 
       // Auto-proceed if --no-confirm
@@ -319,7 +322,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           if (userOverride) {
             postOptions.perPlatformText![key] = userOverride;
           } else {
-            postOptions.perPlatformText![key] = generateForPlatform(context, key, adapter);
+            postOptions.perPlatformText![key] = generateForPlatform(context, key, adapter, (options.verbosity as Verbosity) ?? undefined);
           }
         }
 
@@ -586,9 +589,10 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
       const postOptions: PostOptions = { only: options.only, exclude: options.exclude };
       const adapters = filterAdapters(createAdapters(config, postOptions), postOptions);
 
+      const verbosity = (options.verbosity as Verbosity) ?? undefined;
       const generated: Record<string, { text: string; charCount: number; maxLength: number }> = {};
       for (const [key, adapter] of adapters) {
-        const text = generateForPlatform(ctx, key, adapter);
+        const text = generateForPlatform(ctx, key, adapter, verbosity);
         generated[key] = { text, charCount: text.length, maxLength: adapter.maxTextLength };
       }
 
@@ -681,7 +685,7 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
             </Box>
           )}
           {Array.from(adapters.entries()).map(([key, adapter]) => {
-            const text = generateForPlatform(ctx, key, adapter);
+            const text = generateForPlatform(ctx, key, adapter, (options.verbosity as Verbosity) ?? undefined);
             return (
               <Box key={key} flexDirection="column" marginBottom={1}>
                 <Box>

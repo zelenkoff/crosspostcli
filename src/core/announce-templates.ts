@@ -3,6 +3,7 @@ import type { Adapter } from "../adapters/types.js";
 
 export type Tone = "professional" | "casual" | "excited";
 export type TemplateType = "release" | "feature" | "bugfix" | "update";
+export type Verbosity = "brief" | "normal" | "detailed";
 type PlatformTier = "short" | "medium" | "long" | "article";
 
 export interface AnnounceContext {
@@ -197,8 +198,28 @@ function generateArticle(ctx: AnnounceContext): string {
   return sections.join("\n\n");
 }
 
-export function generateForPlatform(ctx: AnnounceContext, platformKey: string, adapter: Adapter): string {
-  const tier = getTier(adapter.maxTextLength);
+/**
+ * Map verbosity to a tier override. "brief" forces short output,
+ * "detailed" forces the longest output the platform supports,
+ * "normal" (default) uses the automatic tier from maxTextLength.
+ */
+function applyVerbosity(autoTier: PlatformTier, verbosity?: Verbosity): PlatformTier {
+  if (!verbosity || verbosity === "normal") return autoTier;
+  if (verbosity === "brief") {
+    // Clamp down: article→medium, long→medium, medium→short, short→short
+    if (autoTier === "article") return "medium";
+    if (autoTier === "long") return "medium";
+    return "short";
+  }
+  // detailed: push up, but respect platform max (article platforms stay article)
+  if (autoTier === "short") return "medium";
+  if (autoTier === "medium") return "long";
+  return autoTier;
+}
+
+export function generateForPlatform(ctx: AnnounceContext, platformKey: string, adapter: Adapter, verbosity?: Verbosity): string {
+  const autoTier = getTier(adapter.maxTextLength);
+  const tier = applyVerbosity(autoTier, verbosity);
 
   let text: string;
   switch (tier) {
@@ -235,10 +256,11 @@ export function detectTemplate(changelog?: Changelog): TemplateType {
 export function generateAllPlatforms(
   ctx: AnnounceContext,
   adapters: Map<string, Adapter>,
+  verbosity?: Verbosity,
 ): Map<string, string> {
   const result = new Map<string, string>();
   for (const [key, adapter] of adapters) {
-    result.set(key, generateForPlatform(ctx, key, adapter));
+    result.set(key, generateForPlatform(ctx, key, adapter, verbosity));
   }
   return result;
 }

@@ -51,6 +51,9 @@ export class MediumAdapter implements Adapter {
   }
 
   async post(content: PostContent): Promise<PostResult[]> {
+    if (content.language && this.config.language && content.language !== this.config.language) {
+      return [];
+    }
     const start = Date.now();
     try {
       const userId = await this.getUserId();

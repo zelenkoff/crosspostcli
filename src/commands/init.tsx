@@ -17,28 +17,41 @@ const PLATFORM_DISPLAY: Record<string, string> = {
   blog: "Blog (MDX/MD)",
 };
 
-const PLATFORM_FIELDS: Record<string, Array<{ key: string; label: string; secret: boolean }>> = {
+const PLATFORM_FIELDS: Record<string, Array<{ key: string; label: string; secret: boolean; optional?: boolean }>> = {
   telegram: [
     { key: "bot_token", label: "Bot Token", secret: true },
     { key: "_channels", label: "Channel ID (e.g., @mychannel)", secret: false },
+    { key: "_channel_language", label: "Channel language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
   ],
   x: [
     { key: "api_key", label: "API Key", secret: true },
     { key: "api_secret", label: "API Secret", secret: true },
     { key: "access_token", label: "Access Token", secret: true },
     { key: "access_secret", label: "Access Secret", secret: true },
+    { key: "language", label: "Language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
   ],
   bluesky: [
     { key: "handle", label: "Handle (e.g., user.bsky.social)", secret: false },
     { key: "app_password", label: "App Password", secret: true },
+    { key: "language", label: "Language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
   ],
   mastodon: [
     { key: "instance_url", label: "Instance URL (e.g., https://mastodon.social)", secret: false },
     { key: "access_token", label: "Access Token", secret: true },
+    { key: "language", label: "Language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
   ],
-  medium: [{ key: "integration_token", label: "Integration Token", secret: true }],
-  discord: [{ key: "_webhook_url", label: "Webhook URL", secret: true }],
-  blog: [{ key: "content_dir", label: "Content directory path", secret: false }],
+  medium: [
+    { key: "integration_token", label: "Integration Token", secret: true },
+    { key: "language", label: "Language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
+  ],
+  discord: [
+    { key: "_webhook_url", label: "Webhook URL", secret: true },
+    { key: "_webhook_language", label: "Webhook language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
+  ],
+  blog: [
+    { key: "content_dir", label: "Content directory path", secret: false },
+    { key: "language", label: "Language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
+  ],
 };
 
 type Step = "welcome" | "select" | "credentials" | "testing" | "complete";
@@ -86,28 +99,49 @@ function InitWizard() {
     }
 
     if (step === "credentials") {
-      if (key.return && inputValue.trim()) {
-        const platform = selectedList[currentPlatformIndex];
-        const fields = PLATFORM_FIELDS[platform] ?? [];
-        const field = fields[currentFieldIndex];
+      const platform = selectedList[currentPlatformIndex];
+      const fields = PLATFORM_FIELDS[platform] ?? [];
+      const field = fields[currentFieldIndex];
+      const isOptional = field?.optional === true;
 
-        // Store the value
+      if (key.return && (inputValue.trim() || isOptional)) {
+        const value = inputValue.trim();
+
+        // Store the value (skip empty optional fields)
         const newConfig = { ...config };
         const platConfig = { ...newConfig.platforms[platform as keyof typeof newConfig.platforms] } as Record<string, unknown>;
         platConfig.enabled = true;
 
         if (field.key === "_channels") {
           // Telegram channels
-          const channels = (platConfig.channels as Array<{ id: string }>) ?? [];
-          channels.push({ id: inputValue.trim() });
+          const channels = (platConfig.channels as Array<{ id: string; language?: string }>) ?? [];
+          channels.push({ id: value });
           platConfig.channels = channels;
+        } else if (field.key === "_channel_language") {
+          // Set language on the last added Telegram channel
+          if (value) {
+            const channels = (platConfig.channels as Array<{ id: string; language?: string }>) ?? [];
+            if (channels.length > 0) {
+              channels[channels.length - 1].language = value;
+              platConfig.channels = channels;
+            }
+          }
         } else if (field.key === "_webhook_url") {
           // Discord webhooks
-          const webhooks = (platConfig.webhooks as Array<{ url: string }>) ?? [];
-          webhooks.push({ url: inputValue.trim() });
+          const webhooks = (platConfig.webhooks as Array<{ url: string; language?: string }>) ?? [];
+          webhooks.push({ url: value });
           platConfig.webhooks = webhooks;
-        } else {
-          platConfig[field.key] = inputValue.trim();
+        } else if (field.key === "_webhook_language") {
+          // Set language on the last added Discord webhook
+          if (value) {
+            const webhooks = (platConfig.webhooks as Array<{ url: string; language?: string }>) ?? [];
+            if (webhooks.length > 0) {
+              webhooks[webhooks.length - 1].language = value;
+              platConfig.webhooks = webhooks;
+            }
+          }
+        } else if (value) {
+          platConfig[field.key] = value;
         }
 
         (newConfig.platforms as Record<string, unknown>)[platform] = platConfig;

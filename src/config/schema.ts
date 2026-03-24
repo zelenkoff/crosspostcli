@@ -18,29 +18,34 @@ export const XConfigSchema = z.object({
   api_secret: z.string().optional(),
   access_token: z.string().optional(),
   access_secret: z.string().optional(),
+  language: z.string().optional(),
 });
 
 export const BlueskyConfigSchema = z.object({
   enabled: z.boolean().default(false),
   handle: z.string().optional(),
   app_password: z.string().optional(),
+  language: z.string().optional(),
 });
 
 export const MastodonConfigSchema = z.object({
   enabled: z.boolean().default(false),
   instance_url: z.string().optional(),
   access_token: z.string().optional(),
+  language: z.string().optional(),
 });
 
 export const MediumConfigSchema = z.object({
   enabled: z.boolean().default(false),
   integration_token: z.string().optional(),
   publish_status: z.enum(["draft", "public"]).default("draft"),
+  language: z.string().optional(),
 });
 
 export const DiscordWebhookSchema = z.object({
   url: z.string().min(1),
   label: z.string().optional(),
+  language: z.string().optional(),
 });
 
 export const DiscordConfigSchema = z.object({
@@ -54,6 +59,7 @@ export const BlogConfigSchema = z.object({
   content_dir: z.string().optional(),
   git_push: z.boolean().default(false),
   deploy_command: z.string().optional(),
+  language: z.string().optional(),
 });
 
 export const ScreenshotConfigSchema = z.object({

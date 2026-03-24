@@ -42,6 +42,9 @@ export class DiscordAdapter implements Adapter {
     }
 
     for (const webhook of this.config.webhooks) {
+      if (content.language && webhook.language && content.language !== webhook.language) {
+        continue;
+      }
       const start = Date.now();
       try {
         const text = this.formatText(content.text);
