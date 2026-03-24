@@ -8,6 +8,7 @@ import { runInitCommand } from "./commands/init.js";
 import { runStatusCommand } from "./commands/status.js";
 import { runConfigCommand } from "./commands/config.js";
 import { runTestCommand } from "./commands/test-cmd.js";
+import { runScreenshotCommand } from "./commands/screenshot.js";
 
 const VERSION = "0.1.0";
 
@@ -36,6 +37,14 @@ program
   .option("--medium <text>", "Custom text for Medium")
   .option("--blog-slug <slug>", "Blog post slug")
   .option("--blog-title <title>", "Blog post title")
+  .option("--screenshot <url>", "Take screenshot of URL and attach to post")
+  .option("--screenshot-selector <selector>", "CSS selector to capture")
+  .option("--screenshot-highlight <selectors...>", "CSS selectors to highlight")
+  .option("--screenshot-hide <selectors...>", "CSS selectors to hide")
+  .option("--screenshot-device <device>", "Device emulation (e.g., iphone-14)")
+  .option("--screenshot-delay <ms>", "Delay before capture in ms", parseInt)
+  .option("--screenshot-preset <name>", "Use a saved screenshot preset")
+  .option("--screenshot-dark", "Use dark mode for screenshot")
   .action(async (text, opts) => {
     // If no text and no flags, show help
     if (!text && !opts.from && !opts.stdin && !process.stdin.isTTY === false) {
@@ -76,6 +85,41 @@ program
   .description("Send a test message to verify connections")
   .action(async (platform) => {
     await runTestCommand(platform);
+  });
+
+// Screenshot
+program
+  .command("screenshot [url]")
+  .description("Take a screenshot of a web page")
+  .option("--selector <selector>", "CSS selector to capture")
+  .option("--highlight <selectors...>", "CSS selectors to highlight")
+  .option("--hide <selectors...>", "CSS selectors to hide")
+  .option("--device <device>", "Device emulation (e.g., iphone-14, macbook-pro)")
+  .option("--width <pixels>", "Viewport width", parseInt)
+  .option("--height <pixels>", "Viewport height", parseInt)
+  .option("--delay <ms>", "Delay before capture in ms", parseInt)
+  .option("--format <format>", "Output format: png or jpeg")
+  .option("--quality <quality>", "JPEG quality 1-100", parseInt)
+  .option("--full-page", "Capture full scrollable page")
+  .option("--output <path>", "Save screenshot to specific path")
+  .option("--preset <name>", "Use a saved preset")
+  .option("--save-preset <name>", "Save current options as a preset")
+  .option("--delete-preset <name>", "Delete a saved preset")
+  .option("--list-presets", "List saved presets")
+  .option("--list-devices", "List available device presets")
+  .option("--setup", "Install Playwright and Chromium")
+  .option("--dark-mode", "Use dark color scheme")
+  .option("--json", "Output result as JSON")
+  .action(async (url, opts) => {
+    await runScreenshotCommand(url, {
+      ...opts,
+      darkMode: opts.darkMode,
+      fullPage: opts.fullPage,
+      listPresets: opts.listPresets,
+      listDevices: opts.listDevices,
+      savePreset: opts.savePreset,
+      deletePreset: opts.deletePreset,
+    });
   });
 
 // Handle graceful shutdown

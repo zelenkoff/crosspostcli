@@ -8,6 +8,9 @@ import { DryRunPreview } from "../ui/DryRunPreview.js";
 import { ErrorBox } from "../ui/ErrorBox.js";
 import { PlatformStatusLine, type StatusState } from "../ui/PlatformStatus.js";
 import { readFileSync } from "fs";
+import { captureScreenshot, type ScreenshotOptions, formatSize } from "../screenshot/capture.js";
+import { getPreset, presetToOptions } from "../screenshot/presets.js";
+import { checkSetup } from "../screenshot/setup.js";
 
 interface PostCommandOptions {
   text?: string;
@@ -20,8 +23,14 @@ interface PostCommandOptions {
   verbose?: boolean;
   json?: boolean;
   url?: string;
-  screenshotUrl?: string;
+  screenshot?: string;
   screenshotSelector?: string;
+  screenshotHighlight?: string[];
+  screenshotHide?: string[];
+  screenshotDevice?: string;
+  screenshotDelay?: number;
+  screenshotPreset?: string;
+  screenshotDark?: boolean;
   blogSlug?: string;
   blogTitle?: string;
   telegram?: string;
@@ -30,6 +39,42 @@ interface PostCommandOptions {
   mastodon?: string;
   discord?: string;
   medium?: string;
+}
+
+async function resolveScreenshot(options: PostCommandOptions): Promise<Buffer | undefined> {
+  const screenshotUrl = options.screenshot;
+  const presetName = options.screenshotPreset;
+
+  if (!screenshotUrl && !presetName) return undefined;
+
+  let captureOpts: ScreenshotOptions;
+
+  if (presetName) {
+    const preset = getPreset(presetName);
+    if (!preset) throw new Error(`Screenshot preset "${presetName}" not found.`);
+    captureOpts = presetToOptions(preset, {
+      url: screenshotUrl ?? preset.url,
+      selector: options.screenshotSelector,
+      highlight: options.screenshotHighlight,
+      hide: options.screenshotHide,
+      device: options.screenshotDevice,
+      delay: options.screenshotDelay,
+      darkMode: options.screenshotDark,
+    });
+  } else {
+    captureOpts = {
+      url: screenshotUrl!,
+      selector: options.screenshotSelector,
+      highlight: options.screenshotHighlight,
+      hide: options.screenshotHide,
+      device: options.screenshotDevice,
+      delay: options.screenshotDelay,
+      darkMode: options.screenshotDark,
+    };
+  }
+
+  const result = await captureScreenshot(captureOpts);
+  return result.buffer;
 }
 
 interface PlatformState {
@@ -46,6 +91,7 @@ function PostUI({ text, options }: { text: string; options: PostCommandOptions }
   const [done, setDone] = useState(false);
   const [startTime] = useState(Date.now());
   const [error, setError] = useState<string | null>(null);
+  const [screenshotStatus, setScreenshotStatus] = useState<"idle" | "capturing" | "done" | "error">("idle");
 
   useEffect(() => {
     async function run() {
@@ -83,6 +129,23 @@ function PostUI({ text, options }: { text: string; options: PostCommandOptions }
         if (options.image) {
           for (const imgPath of options.image) {
             images.push(readFileSync(imgPath));
+          }
+        }
+
+        // Capture screenshot if requested
+        if (options.screenshot || options.screenshotPreset) {
+          setScreenshotStatus("capturing");
+          try {
+            const screenshotBuffer = await resolveScreenshot(options);
+            if (screenshotBuffer) {
+              images.push(screenshotBuffer);
+            }
+            setScreenshotStatus("done");
+          } catch (err) {
+            setScreenshotStatus("error");
+            setError(`Screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+            setDone(true);
+            return;
           }
         }
 
@@ -146,11 +209,19 @@ function PostUI({ text, options }: { text: string; options: PostCommandOptions }
   }
 
   // Show live progress
+  const showScreenshot = options.screenshot || options.screenshotPreset;
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box marginBottom={1}>
-        <Text bold>{"● Posting..."}</Text>
+        <Text bold>{screenshotStatus === "capturing" ? "● Taking screenshot..." : "● Posting..."}</Text>
       </Box>
+      {showScreenshot && (
+        <PlatformStatusLine
+          name="Screenshot"
+          status={screenshotStatus === "capturing" ? "validating" : screenshotStatus === "done" ? "success" : screenshotStatus === "error" ? "error" : "pending"}
+          detail={screenshotStatus === "capturing" ? "capturing..." : screenshotStatus === "done" ? "captured" : undefined}
+        />
+      )}
       {platformStates.map((p) => (
         <PlatformStatusLine key={p.key} name={p.name} status={p.status} detail={p.detail} channel={p.channel} />
       ))}
@@ -211,6 +282,17 @@ export async function runPostCommand(options: PostCommandOptions): Promise<void>
     if (options.image) {
       for (const imgPath of options.image) {
         images.push(readFileSync(imgPath));
+      }
+    }
+
+    // Capture screenshot in JSON mode
+    if (options.screenshot || options.screenshotPreset) {
+      try {
+        const screenshotBuffer = await resolveScreenshot(options);
+        if (screenshotBuffer) images.push(screenshotBuffer);
+      } catch (err) {
+        console.log(JSON.stringify({ error: `Screenshot failed: ${err instanceof Error ? err.message : String(err)}` }));
+        return;
       }
     }
 

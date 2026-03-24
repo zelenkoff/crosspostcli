@@ -19,10 +19,12 @@ export function App() {
         <Text>  crosspost status           Show connected platforms</Text>
         <Text>  crosspost config           Show/manage configuration</Text>
         <Text>  crosspost test             Send test message to all platforms</Text>
+        <Text>  crosspost screenshot {"<url>"} Take a screenshot of a web page</Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         <Text bold>Options:</Text>
         <Text>  --image {"<path>"}           Attach an image</Text>
+        <Text>  --screenshot {"<url>"}       Take screenshot and attach to post</Text>
         <Text>  --only {"<platforms>"}       Post to specific platforms only</Text>
         <Text>  --exclude {"<platforms>"}    Skip specific platforms</Text>
         <Text>  --dry-run                Preview without posting</Text>
