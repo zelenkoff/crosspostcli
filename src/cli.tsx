@@ -9,6 +9,7 @@ import { runStatusCommand } from "./commands/status.js";
 import { runConfigCommand } from "./commands/config.js";
 import { runTestCommand } from "./commands/test-cmd.js";
 import { runScreenshotCommand } from "./commands/screenshot.js";
+import { startMcpServer } from "./mcp/server.js";
 
 const VERSION = "0.1.0";
 
@@ -120,6 +121,14 @@ program
       savePreset: opts.savePreset,
       deletePreset: opts.deletePreset,
     });
+  });
+
+// MCP server (for AI agents)
+program
+  .command("mcp")
+  .description("Start MCP server for AI agent integration (stdio transport)")
+  .action(async () => {
+    await startMcpServer();
   });
 
 // Handle graceful shutdown
