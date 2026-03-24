@@ -206,14 +206,14 @@ function generateArticle(ctx: AnnounceContext): string {
 function applyVerbosity(autoTier: PlatformTier, verbosity?: Verbosity): PlatformTier {
   if (!verbosity || verbosity === "normal") return autoTier;
   if (verbosity === "brief") {
-    // Clamp down: article→medium, long→medium, medium→short, short→short
+    // Clamp down: article→medium, long→short, medium→short, short→short
     if (autoTier === "article") return "medium";
-    if (autoTier === "long") return "medium";
     return "short";
   }
-  // detailed: push up, but respect platform max (article platforms stay article)
+  // detailed: push up one level
   if (autoTier === "short") return "medium";
   if (autoTier === "medium") return "long";
+  if (autoTier === "long") return "article";
   return autoTier;
 }
 
@@ -237,9 +237,15 @@ export function generateForPlatform(ctx: AnnounceContext, platformKey: string, a
       break;
   }
 
-  // For article-tier platforms that support markdown, keep as-is
-  if (tier === "article" && (adapter.supportsMarkdown || adapter.supportsHtml)) {
+  // For native article-tier platforms that support markdown, keep as-is
+  // (don't skip formatText when verbosity pushed a non-article platform up)
+  if (autoTier === "article" && (adapter.supportsMarkdown || adapter.supportsHtml)) {
     return text;
+  }
+
+  // Strip markdown headers for platforms that don't support markdown
+  if (tier === "article" && !adapter.supportsMarkdown) {
+    text = text.replace(/^#{1,3}\s+/gm, "").replace(/\*\*(.+?)\*\*/g, "$1");
   }
 
   return adapter.formatText(text);
