@@ -19,6 +19,7 @@ import { StepIndicator } from "../ui/StepIndicator.js";
 import { PlatformStatusLine, type StatusState } from "../ui/PlatformStatus.js";
 import { captureScreenshot, type ScreenshotOptions } from "../screenshot/capture.js";
 import { getPreset, presetToOptions } from "../screenshot/presets.js";
+import { discoverFeatures, type DiscoveryResult, type DiscoveredFeature } from "../core/discover.js";
 import { readFileSync } from "fs";
 
 export interface AnnounceCommandOptions {
@@ -36,6 +37,10 @@ export interface AnnounceCommandOptions {
   screenshotDelay?: number;
   screenshotPreset?: string;
   screenshotDark?: boolean;
+  discover?: string;
+  discoverKeywords?: string[];
+  discoverMaxPages?: number;
+  discoverDevice?: string;
   projectName?: string;
   version?: string;
   url?: string;
@@ -57,7 +62,7 @@ export interface AnnounceCommandOptions {
   medium?: string;
 }
 
-type Phase = "gather" | "screenshot" | "preview" | "posting" | "done" | "error";
+type Phase = "gather" | "discover" | "screenshot" | "preview" | "posting" | "done" | "error";
 
 interface PlatformState {
   key: string;
@@ -71,6 +76,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [phase, setPhase] = useState<Phase>("gather");
   const [changelog, setChangelog] = useState<Changelog | null>(null);
   const [screenshotBuffer, setScreenshotBuffer] = useState<Buffer | null>(null);
+  const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
+  const [discoverStatus, setDiscoverStatus] = useState<string>("");
   const [generatedTexts, setGeneratedTexts] = useState<Map<string, string>>(new Map());
   const [platformStates, setPlatformStates] = useState<PlatformState[]>([]);
   const [results, setResults] = useState<PostResult[]>([]);
@@ -124,7 +131,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           }
         }
 
-        if (!description && !log) {
+        if (!description && !log && !options.discover) {
           setError("No description or git range provided.");
           setErrorSuggestion(
             'Usage: crosspost announce "description" or crosspost announce --from-git --tag v1.0',
@@ -149,8 +156,10 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         };
         setContext(ctx);
 
-        // Check if we need screenshots
-        if (options.screenshot || options.screenshotPreset) {
+        // Check what's next: discover → screenshot → preview
+        if (options.discover) {
+          setPhase("discover");
+        } else if (options.screenshot || options.screenshotPreset) {
           setPhase("screenshot");
         } else {
           setPhase("preview");
@@ -161,6 +170,62 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
       }
     })();
   }, [phase]);
+
+  // Phase: Discover
+  useEffect(() => {
+    if (phase !== "discover" || !context) return;
+    (async () => {
+      try {
+        setDiscoverStatus("Opening app...");
+        const result = await discoverFeatures({
+          url: options.discover!,
+          changelog: context.changelog,
+          keywords: options.discoverKeywords,
+          maxPages: options.discoverMaxPages,
+          delay: options.screenshotDelay,
+          device: options.discoverDevice ?? options.screenshotDevice,
+          darkMode: options.screenshotDark,
+          hide: options.screenshotHide,
+        });
+
+        setDiscoveryResult(result);
+
+        // Use the best screenshot as the main image
+        if (result.features.length > 0) {
+          // Use the top-confidence feature screenshot
+          setScreenshotBuffer(result.features[0].screenshot);
+        } else {
+          // Fall back to overview screenshot
+          setScreenshotBuffer(result.overviewScreenshot);
+        }
+
+        // Enrich the context description with discovered features
+        if (result.features.length > 0 && context) {
+          const featureList = result.features
+            .slice(0, 5)
+            .map((f) => `- ${f.matchedText} (${f.pageTitle})`)
+            .join("\n");
+
+          const enriched = context.description
+            ? `${context.description}\n\nDiscovered in the app:\n${featureList}`
+            : `Discovered features:\n${featureList}`;
+
+          setContext({ ...context, description: enriched });
+        }
+
+        // Continue to screenshot if also requested, otherwise preview
+        if (options.screenshot || options.screenshotPreset) {
+          setPhase("screenshot");
+        } else {
+          setPhase("preview");
+        }
+      } catch (err) {
+        setError(`Discovery failed: ${err instanceof Error ? err.message : String(err)}`);
+        setErrorSuggestion("Make sure your app is running at the provided URL.\nRun: crosspost screenshot --setup");
+        setPhase("error");
+      }
+    })();
+  }, [phase, context]);
 
   // Phase: Screenshot
   useEffect(() => {
@@ -329,7 +394,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   if (phase === "gather") {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <StepIndicator current={1} total={4} label="Gathering changes" />
+        <StepIndicator current={1} total={options.discover ? 5 : 4} label="Gathering changes" />
         <Box marginTop={1}>
           <Text>
             <Text color="green"><Spinner type="dots" /></Text>
@@ -340,10 +405,31 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
     );
   }
 
-  if (phase === "screenshot") {
+  if (phase === "discover") {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <StepIndicator current={2} total={4} label="Capturing screenshot" />
+        <StepIndicator current={2} total={5} label="Discovering features" />
+        <Box marginTop={1}>
+          <Text>
+            <Text color="green"><Spinner type="dots" /></Text>
+            {" "}Exploring app at {options.discover}...
+          </Text>
+        </Box>
+        {discoverStatus && (
+          <Box marginLeft={3}>
+            <Text dimColor>{discoverStatus}</Text>
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
+  if (phase === "screenshot") {
+    const step = options.discover ? 3 : 2;
+    const total = options.discover ? 5 : 4;
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <StepIndicator current={step} total={total} label="Capturing screenshot" />
         <Box marginTop={1}>
           <Text>
             <Text color="green"><Spinner type="dots" /></Text>
@@ -361,7 +447,23 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
 
     return (
       <Box flexDirection="column" paddingX={1}>
-        <StepIndicator current={3} total={4} label="Review content" />
+        <StepIndicator current={options.discover ? 4 : 3} total={options.discover ? 5 : 4} label="Review content" />
+
+        {discoveryResult && (
+          <Box marginTop={1} marginBottom={1} flexDirection="column">
+            <Text color="green" bold>
+              ✓ Discovered {discoveryResult.features.length} feature{discoveryResult.features.length !== 1 ? "s" : ""} across {discoveryResult.pagesVisited.length} page{discoveryResult.pagesVisited.length !== 1 ? "s" : ""}
+            </Text>
+            {discoveryResult.features.slice(0, 5).map((f, i) => (
+              <Box key={i} marginLeft={2}>
+                <Text>
+                  <Text dimColor>•</Text> <Text bold>{f.matchedText}</Text>
+                  <Text dimColor> ({f.keyword}, {Math.round(f.confidence * 100)}% match, {Math.round(f.screenshot.length / 1024)}KB screenshot)</Text>
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        )}
 
         {changelog && (
           <Box marginTop={1} marginBottom={1}>
@@ -414,7 +516,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   if (phase === "posting") {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <StepIndicator current={4} total={4} label="Posting" />
+        <StepIndicator current={options.discover ? 5 : 4} total={options.discover ? 5 : 4} label="Posting" />
         <Box marginTop={1} marginBottom={1}>
           <Text bold>● Posting to {platformStates.length} platforms...</Text>
         </Box>
@@ -440,7 +542,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
 
 export async function runAnnounceCommand(options: AnnounceCommandOptions): Promise<void> {
   // Determine if we should use git
-  if (!options.description && !options.from && !options.fromGit && !options.commits && !options.since && !options.tag) {
+  if (!options.description && !options.from && !options.fromGit && !options.commits && !options.since && !options.tag && !options.discover) {
     console.error(
       'Error: Provide a description or use --from-git.\n\nUsage:\n  crosspost announce "description"\n  crosspost announce --from-git --tag v1.0\n  crosspost announce --from-git --since 2026-03-01',
     );

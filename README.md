@@ -145,6 +145,20 @@ crosspost announce --from-git --tag v1.0 \
   --screenshot http://localhost:3000 \
   --screenshot-highlight ".new-feature"
 
+# Smart discovery — crawl your app and find features automatically
+crosspost announce --from-git --tag v1.0 \
+  --discover http://localhost:3000
+
+# Discovery with extra keywords to search for
+crosspost announce --from-git \
+  --discover http://localhost:3000 \
+  --discover-keywords "dashboard" "settings" "dark mode"
+
+# Discovery on mobile viewport
+crosspost announce --from-git \
+  --discover http://localhost:3000 \
+  --discover-device iphone-14
+
 # Control the tone
 crosspost announce "Big update" --tone excited --version "3.0"
 
@@ -154,7 +168,11 @@ crosspost announce --from-git --tag v1.0 --no-confirm --json
 
 **Source options:** `--from-git`, `--commits <range>`, `--since <date>`, `--tag <tag>`, `--from <file>`
 
+**Discovery options:** `--discover <url>`, `--discover-keywords <words...>`, `--discover-max-pages <n>`, `--discover-device <device>`
+
 **Content options:** `--project-name <name>`, `--version <ver>`, `--url <url>`, `--tone` (`professional` | `casual` | `excited`), `--template` (`release` | `feature` | `bugfix` | `update`)
+
+The `--discover` flag uses Playwright to crawl your running app (up to 8 pages by default), searches for UI elements matching your changelog keywords, highlights them with a red outline, and takes screenshots. The best screenshot is automatically attached to your posts. Keywords are extracted from commit subjects — or you can provide extra ones with `--discover-keywords`.
 
 The command auto-detects the template type from your commits: feature-only changelogs get a "feature" template, fix-only get "bugfix", mixed get "release". Content is automatically sized per platform — a 280-char tweet, a 500-char toot, a full changelog for Telegram, and a markdown article for your blog.
 
