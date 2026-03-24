@@ -70,6 +70,21 @@ function ConfigDisplay() {
           </Box>
         );
       })}
+      {/* AI Config */}
+      <Box flexDirection="column" marginBottom={1}>
+        <Box>
+          <Text color={config.ai?.api_key ? "green" : "gray"}>
+            {config.ai?.api_key ? "✓" : "○"} ai
+          </Text>
+        </Box>
+        {config.ai?.api_key && (
+          <Box flexDirection="column" marginLeft={4}>
+            <Text dimColor>provider: {config.ai.provider}</Text>
+            {config.ai.model && <Text dimColor>model: {config.ai.model}</Text>}
+            <Text dimColor>api_key: {maskValue("api_key", config.ai.api_key)}</Text>
+          </Box>
+        )}
+      </Box>
     </Box>
   );
 }

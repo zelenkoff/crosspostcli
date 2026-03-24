@@ -166,11 +166,15 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         setContext(ctx);
 
         // Check what's next: discover → screenshot → ai-generating → preview
-        const nextPhase = () => {
-          const config = loadConfig();
-          const useAi = options.ai ?? config.ai?.enabled;
-          const aiOpts = useAi ? buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel }) : null;
-          return aiOpts ? "ai-generating" : "preview";
+        const resolveAiPhase = (): Phase => {
+          if (options.ai === false) return "preview";
+          const cfg = loadConfig();
+          const aiOpts = buildAiOptions(cfg.ai, { provider: options.aiProvider, model: options.aiModel });
+          if (!aiOpts) {
+            setAiWarning("AI API key not configured. Using templates. Run: crosspost init");
+            return "preview";
+          }
+          return "ai-generating";
         };
 
         if (options.discover) {
@@ -178,7 +182,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         } else if (options.screenshot || options.screenshotPreset) {
           setPhase("screenshot");
         } else {
-          setPhase(nextPhase());
+          setPhase(resolveAiPhase());
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -232,10 +236,14 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         // Continue to screenshot if also requested, otherwise ai-generating/preview
         if (options.screenshot || options.screenshotPreset) {
           setPhase("screenshot");
+        } else if (options.ai === false) {
+          setPhase("preview");
         } else {
-          const config = loadConfig();
-          const useAi = options.ai ?? config.ai?.enabled;
-          const aiOpts = useAi ? buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel }) : null;
+          const cfg = loadConfig();
+          const aiOpts = buildAiOptions(cfg.ai, { provider: options.aiProvider, model: options.aiModel });
+          if (!aiOpts) {
+            setAiWarning("AI API key not configured. Using templates. Run: crosspost init");
+          }
           setPhase(aiOpts ? "ai-generating" : "preview");
         }
       } catch (err) {
@@ -277,10 +285,16 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         }
         const result = await captureScreenshot(captureOpts);
         setScreenshotBuffer(result.buffer);
-        const config = loadConfig();
-        const useAi = options.ai ?? config.ai?.enabled;
-        const aiOpts = useAi ? buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel }) : null;
-        setPhase(aiOpts ? "ai-generating" : "preview");
+        if (options.ai === false) {
+          setPhase("preview");
+        } else {
+          const cfg = loadConfig();
+          const aiOpts = buildAiOptions(cfg.ai, { provider: options.aiProvider, model: options.aiModel });
+          if (!aiOpts) {
+            setAiWarning("AI API key not configured. Using templates. Run: crosspost init");
+          }
+          setPhase(aiOpts ? "ai-generating" : "preview");
+        }
       } catch (err) {
         setError(`Screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
         setErrorSuggestion("Run: crosspost screenshot --setup");
@@ -692,9 +706,8 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
       let aiGenerated = false;
       const generated: Record<string, { text: string; charCount: number; maxLength: number }> = {};
 
-      // Try AI generation
-      const useAi = options.ai ?? config.ai?.enabled;
-      if (useAi) {
+      // Try AI generation (on by default)
+      if (options.ai !== false) {
         const aiOpts = buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel });
         if (aiOpts) {
           try {
@@ -800,8 +813,7 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
       let textsMap = new Map<string, string>();
       let dryRunAiUsed = false;
 
-      const useAi = options.ai ?? config.ai?.enabled;
-      if (useAi) {
+      if (options.ai !== false) {
         const aiOpts = buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel });
         if (aiOpts) {
           try {
@@ -811,6 +823,8 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
           } catch (err) {
             console.error(`AI generation failed, using templates: ${err instanceof Error ? err.message : String(err)}`);
           }
+        } else {
+          console.error("AI API key not configured. Using templates. Run: crosspost init");
         }
       }
 

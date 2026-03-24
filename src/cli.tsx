@@ -151,7 +151,7 @@ program
   .option("--tone <tone>", "Tone: professional, casual, excited (default: casual)")
   .option("--template <type>", "Template: release, feature, bugfix, update (default: auto-detect)")
   .option("--verbosity <level>", "Content verbosity: brief, normal, detailed (default: normal)")
-  .option("--ai", "Use AI to generate platform-optimized posts")
+  .option("--no-ai", "Disable AI content generation (use templates only)")
   .option("--ai-provider <provider>", "AI provider: anthropic, openai (default: from config)")
   .option("--ai-model <model>", "AI model to use (default: from config)")
   .option("--image <paths...>", "Image file path(s) to attach")

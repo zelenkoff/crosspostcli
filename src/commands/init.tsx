@@ -54,7 +54,8 @@ const PLATFORM_FIELDS: Record<string, Array<{ key: string; label: string; secret
   ],
 };
 
-type Step = "welcome" | "select" | "credentials" | "testing" | "complete";
+type Step = "welcome" | "select" | "credentials" | "testing" | "ai-setup" | "complete";
+type AiSetupField = "ask" | "provider" | "api_key";
 
 function InitWizard() {
   const { exit } = useApp();
@@ -67,6 +68,9 @@ function InitWizard() {
   const [config, setConfig] = useState<Config>(loadConfig());
   const [validationResults, setValidationResults] = useState<Map<string, boolean>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [aiSetupField, setAiSetupField] = useState<AiSetupField>("ask");
+  const [aiProvider, setAiProvider] = useState<"anthropic" | "openai">("anthropic");
+  const [aiCursor, setAiCursor] = useState(0);
 
   const platformList = Array.from(PLATFORM_NAMES);
   const selectedList = platformList.filter((p) => selectedPlatforms.has(p));
@@ -166,6 +170,54 @@ function InitWizard() {
       }
       return;
     }
+
+    if (step === "ai-setup") {
+      const providers = ["anthropic", "openai"] as const;
+
+      if (aiSetupField === "ask") {
+        // Y/N prompt: set up AI?
+        const lower = input.toLowerCase();
+        if (lower === "y" || key.return) {
+          setAiSetupField("provider");
+          setAiCursor(0);
+        } else if (lower === "n" || key.escape) {
+          setStep("complete");
+        }
+        return;
+      }
+
+      if (aiSetupField === "provider") {
+        if (key.upArrow) setAiCursor((c) => Math.max(0, c - 1));
+        if (key.downArrow) setAiCursor((c) => Math.min(providers.length - 1, c + 1));
+        if (key.return) {
+          setAiProvider(providers[aiCursor]);
+          setInputValue("");
+          setAiSetupField("api_key");
+        }
+        return;
+      }
+
+      if (aiSetupField === "api_key") {
+        if (key.return && inputValue.trim()) {
+          const newConfig = { ...config };
+          newConfig.ai = {
+            ...newConfig.ai,
+            enabled: true,
+            provider: aiProvider,
+            api_key: inputValue.trim(),
+          };
+          setConfig(newConfig as Config);
+          saveConfig(newConfig as Config);
+          setInputValue("");
+          setStep("complete");
+        } else if (key.backspace || key.delete) {
+          setInputValue((v) => v.slice(0, -1));
+        } else if (input && !key.ctrl && !key.meta) {
+          setInputValue((v) => v + input);
+        }
+        return;
+      }
+    }
   });
 
   // Run validation when testing
@@ -176,10 +228,15 @@ function InitWizard() {
         const adapters = createAdapters(config);
         const results = await validateAll(adapters);
         setValidationResults(results);
-        setStep("complete");
+        // If AI is already configured, skip AI setup
+        if (config.ai?.api_key) {
+          setStep("complete");
+        } else {
+          setStep("ai-setup");
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
-        setStep("complete");
+        setStep("ai-setup");
       }
     }
     test();
@@ -281,13 +338,70 @@ function InitWizard() {
     );
   }
 
+  if (step === "ai-setup") {
+    const providers = ["Anthropic (Claude)", "OpenAI (GPT)"] as const;
+
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <Box marginBottom={1}>
+          <Text bold color="cyan">
+            {"◆ CrossPost Setup — AI Content Generation"}
+          </Text>
+        </Box>
+
+        {aiSetupField === "ask" && (
+          <>
+            <Text>The <Text bold>announce</Text> command uses AI to generate platform-optimized posts.</Text>
+            <Text>Bring your own API key from Anthropic or OpenAI.</Text>
+            <Box marginTop={1}>
+              <Text>Set up AI content generation? <Text bold>[Y/n]</Text></Text>
+            </Box>
+          </>
+        )}
+
+        {aiSetupField === "provider" && (
+          <>
+            <Text>Select your AI provider:</Text>
+            <Box flexDirection="column" marginTop={1}>
+              {providers.map((p, i) => (
+                <Box key={i}>
+                  <Text color={aiCursor === i ? "cyan" : undefined}>
+                    {aiCursor === i ? "❯ " : "  "}
+                    {aiCursor === i ? "◉" : "◯"} {p}
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+            <Box marginTop={1}>
+              <Text dimColor>Press Enter to confirm</Text>
+            </Box>
+          </>
+        )}
+
+        {aiSetupField === "api_key" && (
+          <>
+            <Text>Enter your {aiProvider === "anthropic" ? "Anthropic" : "OpenAI"} API key:</Text>
+            <Box marginTop={1}>
+              <Text>API Key: </Text>
+              <Text color="cyan">{"•".repeat(inputValue.length)}</Text>
+              <Text>{"█"}</Text>
+            </Box>
+          </>
+        )}
+      </Box>
+    );
+  }
+
   // Complete
   const details = selectedList.map((p) => {
     const valid = validationResults.get(p);
-    const icon = valid ? "✓" : "✗";
-    const color = valid ? "green" : "red";
-    return `${icon} ${PLATFORM_DISPLAY[p]} — ${valid ? "connected" : "failed"}`;
+    return `${valid ? "✓" : "✗"} ${PLATFORM_DISPLAY[p]} — ${valid ? "connected" : "failed"}`;
   });
+
+  if (config.ai?.api_key) {
+    const providerLabel = config.ai.provider === "openai" ? "OpenAI" : "Anthropic";
+    details.push(`✓ AI (${providerLabel}) — configured`);
+  }
 
   return (
     <Box flexDirection="column" paddingX={1}>
