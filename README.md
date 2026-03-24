@@ -120,11 +120,50 @@ crosspost screenshot --setup
 
 **Presets:** Save screenshot options for reuse with `--save-preset <name>`, apply with `--preset <name>`, list with `--list-presets`.
 
+### Announce — Smart Content Generation
+
+Generate platform-tailored announcements from git history or a description. Produces short tweets for X/Bluesky, medium posts for Mastodon, full changelogs for Telegram/Discord, and markdown articles for Medium/Blog — all from a single command.
+
+```bash
+# Announce from a description
+crosspost announce "We just shipped dark mode and PDF export"
+
+# Generate from git history since a tag
+crosspost announce --from-git --tag v1.0 --version "2.0"
+
+# Generate from recent commits with a link
+crosspost announce --from-git --since 2026-03-01 --url https://example.com/changelog
+
+# Generate from a commit range
+crosspost announce --from-git --commits "v1.0..v1.1"
+
+# Preview without posting
+crosspost announce "New release" --dry-run
+
+# Screenshot the app and include it
+crosspost announce --from-git --tag v1.0 \
+  --screenshot http://localhost:3000 \
+  --screenshot-highlight ".new-feature"
+
+# Control the tone
+crosspost announce "Big update" --tone excited --version "3.0"
+
+# Skip confirmation (for CI)
+crosspost announce --from-git --tag v1.0 --no-confirm --json
+```
+
+**Source options:** `--from-git`, `--commits <range>`, `--since <date>`, `--tag <tag>`, `--from <file>`
+
+**Content options:** `--project-name <name>`, `--version <ver>`, `--url <url>`, `--tone` (`professional` | `casual` | `excited`), `--template` (`release` | `feature` | `bugfix` | `update`)
+
+The command auto-detects the template type from your commits: feature-only changelogs get a "feature" template, fix-only get "bugfix", mixed get "release". Content is automatically sized per platform — a 280-char tweet, a 500-char toot, a full changelog for Telegram, and a markdown article for your blog.
+
 ### Commands
 
 | Command | Description |
 |---------|-------------|
 | `crosspost [text]` | Post to all connected platforms |
+| `crosspost announce [desc]` | Generate and post announcements from git history |
 | `crosspost init` | Interactive setup wizard |
 | `crosspost status` | Show connected platforms |
 | `crosspost test [platform]` | Send a test message |

@@ -10,6 +10,7 @@ import { runConfigCommand } from "./commands/config.js";
 import { runTestCommand } from "./commands/test-cmd.js";
 import { runScreenshotCommand } from "./commands/screenshot.js";
 import { startMcpServer } from "./mcp/server.js";
+import { runAnnounceCommand } from "./commands/announce.js";
 
 const VERSION = "0.1.0";
 
@@ -121,6 +122,46 @@ program
       savePreset: opts.savePreset,
       deletePreset: opts.deletePreset,
     });
+  });
+
+// Announce — smart content generation from git history
+program
+  .command("announce [description]")
+  .description("Generate and post announcements from git history or a description")
+  .option("--from-git", "Auto-detect changes from git history")
+  .option("--commits <range>", "Git commit range (e.g., v1.0..v1.1, HEAD~5..HEAD)")
+  .option("--since <date>", "Commits since date (e.g., 2026-03-01)")
+  .option("--tag <tag>", "Commits since tag (e.g., v1.0)")
+  .option("--from <file>", "Read description from file")
+  .option("--screenshot <url>", "Take screenshot of app and attach to post")
+  .option("--screenshot-selector <selector>", "CSS selector to capture")
+  .option("--screenshot-highlight <selectors...>", "CSS selectors to highlight")
+  .option("--screenshot-hide <selectors...>", "CSS selectors to hide")
+  .option("--screenshot-device <device>", "Device emulation (e.g., iphone-14)")
+  .option("--screenshot-delay <ms>", "Delay before capture in ms", parseInt)
+  .option("--screenshot-preset <name>", "Use a saved screenshot preset")
+  .option("--screenshot-dark", "Use dark mode for screenshot")
+  .option("--project-name <name>", "Project name (default: git remote or dir name)")
+  .option("--version <version>", "Version string to include")
+  .option("--url <url>", "Link to release/changelog")
+  .option("--tone <tone>", "Tone: professional, casual, excited (default: casual)")
+  .option("--template <type>", "Template: release, feature, bugfix, update (default: auto-detect)")
+  .option("--image <paths...>", "Image file path(s) to attach")
+  .option("--only <platforms>", "Post to specific platforms only (comma-separated)", (v) => v.split(","))
+  .option("--exclude <platforms>", "Skip specific platforms (comma-separated)", (v) => v.split(","))
+  .option("--dry-run", "Preview without posting")
+  .option("--json", "Output as JSON")
+  .option("--no-confirm", "Skip interactive review (for CI/scripts)")
+  .option("--blog-slug <slug>", "Blog post slug")
+  .option("--blog-title <title>", "Blog post title")
+  .option("--telegram <text>", "Custom text for Telegram")
+  .option("--x <text>", "Custom text for X/Twitter")
+  .option("--bluesky <text>", "Custom text for Bluesky")
+  .option("--mastodon <text>", "Custom text for Mastodon")
+  .option("--discord <text>", "Custom text for Discord")
+  .option("--medium <text>", "Custom text for Medium")
+  .action(async (description, opts) => {
+    await runAnnounceCommand({ description, ...opts });
   });
 
 // MCP server (for AI agents)
