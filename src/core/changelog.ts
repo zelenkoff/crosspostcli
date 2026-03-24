@@ -115,6 +115,30 @@ function summarizeChangelog(features: number, fixes: number, other: number): str
   return parts.join(", ") || "no changes found";
 }
 
+export async function getDiffForRange(options: {
+  commits?: string;
+  since?: string;
+  tag?: string;
+}): Promise<string> {
+  const args = ["diff", "--stat", "-p"];
+
+  if (options.tag) {
+    args.push(`${options.tag}..HEAD`);
+  } else if (options.commits) {
+    args.push(options.commits);
+  } else {
+    args.push("HEAD~10..HEAD");
+  }
+
+  try {
+    const output = await runGit(args);
+    // Truncate to ~3000 chars to keep token budget reasonable
+    return output.slice(0, 3000);
+  } catch {
+    return "";
+  }
+}
+
 export async function getProjectName(): Promise<string> {
   try {
     const remote = await runGit(["remote", "get-url", "origin"]);

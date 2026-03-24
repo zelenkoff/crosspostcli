@@ -22,6 +22,8 @@ import { captureScreenshot, type ScreenshotOptions } from "../screenshot/capture
 import { getPreset, presetToOptions } from "../screenshot/presets.js";
 import { discoverFeatures, type DiscoveryResult, type DiscoveredFeature } from "../core/discover.js";
 import { readFileSync } from "fs";
+import { getDiffForRange } from "../core/changelog.js";
+import { generateWithAi, buildAiOptions } from "../core/ai-generator.js";
 
 export interface AnnounceCommandOptions {
   description?: string;
@@ -62,9 +64,12 @@ export interface AnnounceCommandOptions {
   mastodon?: string;
   discord?: string;
   medium?: string;
+  ai?: boolean;
+  aiProvider?: string;
+  aiModel?: string;
 }
 
-type Phase = "gather" | "discover" | "screenshot" | "preview" | "posting" | "done" | "error";
+type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "preview" | "posting" | "done" | "error";
 
 interface PlatformState {
   key: string;
@@ -87,6 +92,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [errorSuggestion, setErrorSuggestion] = useState<string | undefined>();
   const [startTime] = useState(Date.now());
   const [context, setContext] = useState<AnnounceContext | null>(null);
+  const [aiUsed, setAiUsed] = useState(false);
+  const [aiWarning, setAiWarning] = useState<string | null>(null);
 
   // Handle keyboard input during preview phase
   useInput(
@@ -158,13 +165,20 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         };
         setContext(ctx);
 
-        // Check what's next: discover → screenshot → preview
+        // Check what's next: discover → screenshot → ai-generating → preview
+        const nextPhase = () => {
+          const config = loadConfig();
+          const useAi = options.ai ?? config.ai?.enabled;
+          const aiOpts = useAi ? buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel }) : null;
+          return aiOpts ? "ai-generating" : "preview";
+        };
+
         if (options.discover) {
           setPhase("discover");
         } else if (options.screenshot || options.screenshotPreset) {
           setPhase("screenshot");
         } else {
-          setPhase("preview");
+          setPhase(nextPhase());
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -215,11 +229,14 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           setContext({ ...context, description: enriched });
         }
 
-        // Continue to screenshot if also requested, otherwise preview
+        // Continue to screenshot if also requested, otherwise ai-generating/preview
         if (options.screenshot || options.screenshotPreset) {
           setPhase("screenshot");
         } else {
-          setPhase("preview");
+          const config = loadConfig();
+          const useAi = options.ai ?? config.ai?.enabled;
+          const aiOpts = useAi ? buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel }) : null;
+          setPhase(aiOpts ? "ai-generating" : "preview");
         }
       } catch (err) {
         setError(`Discovery failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -260,7 +277,10 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         }
         const result = await captureScreenshot(captureOpts);
         setScreenshotBuffer(result.buffer);
-        setPhase("preview");
+        const config = loadConfig();
+        const useAi = options.ai ?? config.ai?.enabled;
+        const aiOpts = useAi ? buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel }) : null;
+        setPhase(aiOpts ? "ai-generating" : "preview");
       } catch (err) {
         setError(`Screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
         setErrorSuggestion("Run: crosspost screenshot --setup");
@@ -269,9 +289,59 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
     })();
   }, [phase]);
 
-  // Phase: Generate preview texts when entering preview
+  // Phase: AI Generation
+  useEffect(() => {
+    if (phase !== "ai-generating" || !context) return;
+    (async () => {
+      try {
+        const config = loadConfig();
+        const postOptions: PostOptions = { only: options.only, exclude: options.exclude };
+        const adapters = filterAdapters(createAdapters(config, postOptions), postOptions);
+
+        if (adapters.size === 0) {
+          setError("No platforms configured.");
+          setErrorSuggestion("Run: crosspost init");
+          setPhase("error");
+          return;
+        }
+
+        const aiOpts = buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel });
+        if (!aiOpts) {
+          // Shouldn't happen since we checked before entering this phase, but fallback
+          setPhase("preview");
+          return;
+        }
+
+        const verbosity = (options.verbosity as Verbosity) ?? undefined;
+        const diff = await getDiffForRange({
+          commits: options.commits,
+          since: options.since,
+          tag: options.tag,
+        });
+
+        const texts = await generateWithAi(context, adapters, aiOpts, verbosity, diff || undefined);
+        setGeneratedTexts(texts);
+        setAiUsed(true);
+        setPhase("preview");
+      } catch (err) {
+        // Fallback to template generation
+        const msg = err instanceof Error ? err.message : String(err);
+        setAiWarning(`AI generation failed: ${msg}. Using template fallback.`);
+        setPhase("preview");
+      }
+    })();
+  }, [phase, context]);
+
+  // Phase: Generate preview texts when entering preview (template fallback or non-AI path)
   useEffect(() => {
     if (phase !== "preview" || !context) return;
+    // If AI already generated texts, skip template generation
+    if (generatedTexts.size > 0) {
+      if (options.noConfirm) {
+        setPhase("posting");
+      }
+      return;
+    }
     try {
       const config = loadConfig();
       const postOptions: PostOptions = { only: options.only, exclude: options.exclude };
@@ -321,6 +391,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           const userOverride = (options as Record<string, string | undefined>)[key];
           if (userOverride) {
             postOptions.perPlatformText![key] = userOverride;
+          } else if (generatedTexts.has(key)) {
+            // Use AI-generated or previously generated text
+            postOptions.perPlatformText![key] = generatedTexts.get(key)!;
           } else {
             postOptions.perPlatformText![key] = generateForPlatform(context, key, adapter, (options.verbosity as Verbosity) ?? undefined);
           }
@@ -443,6 +516,20 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
     );
   }
 
+  if (phase === "ai-generating") {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <StepIndicator current={options.discover ? 4 : options.screenshot ? 3 : 2} total={options.discover ? 6 : options.screenshot ? 5 : 4} label="AI generation" />
+        <Box marginTop={1}>
+          <Text>
+            <Text color="green"><Spinner type="dots" /></Text>
+            {" "}Generating content with AI...
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
+
   if (phase === "preview") {
     const config = loadConfig();
     const postOptions: PostOptions = { only: options.only, exclude: options.exclude };
@@ -465,6 +552,18 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
                 </Text>
               </Box>
             ))}
+          </Box>
+        )}
+
+        {aiUsed && (
+          <Box marginTop={1}>
+            <Text color="green" bold>✓ AI-generated content</Text>
+          </Box>
+        )}
+
+        {aiWarning && (
+          <Box marginTop={1}>
+            <Text color="yellow">{aiWarning}</Text>
           </Box>
         )}
 
@@ -590,14 +689,37 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
       const adapters = filterAdapters(createAdapters(config, postOptions), postOptions);
 
       const verbosity = (options.verbosity as Verbosity) ?? undefined;
+      let aiGenerated = false;
       const generated: Record<string, { text: string; charCount: number; maxLength: number }> = {};
-      for (const [key, adapter] of adapters) {
-        const text = generateForPlatform(ctx, key, adapter, verbosity);
-        generated[key] = { text, charCount: text.length, maxLength: adapter.maxTextLength };
+
+      // Try AI generation
+      const useAi = options.ai ?? config.ai?.enabled;
+      if (useAi) {
+        const aiOpts = buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel });
+        if (aiOpts) {
+          try {
+            const diff = await getDiffForRange({ commits: options.commits, since: options.since, tag: options.tag });
+            const aiTexts = await generateWithAi(ctx, adapters, aiOpts, verbosity, diff || undefined);
+            for (const [key, adapter] of adapters) {
+              const text = aiTexts.get(key) ?? generateForPlatform(ctx, key, adapter, verbosity);
+              generated[key] = { text, charCount: text.length, maxLength: adapter.maxTextLength };
+            }
+            aiGenerated = true;
+          } catch {
+            // Fallback to template below
+          }
+        }
+      }
+
+      if (!aiGenerated) {
+        for (const [key, adapter] of adapters) {
+          const text = generateForPlatform(ctx, key, adapter, verbosity);
+          generated[key] = { text, charCount: text.length, maxLength: adapter.maxTextLength };
+        }
       }
 
       if (options.dryRun) {
-        console.log(JSON.stringify({ dryRun: true, changelog: changelog?.summary, generated }, null, 2));
+        console.log(JSON.stringify({ dryRun: true, aiGenerated, changelog: changelog?.summary, generated }, null, 2));
         return;
       }
 
@@ -673,19 +795,47 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
         return;
       }
 
+      // Generate texts (AI or template)
+      const verbosity = (options.verbosity as Verbosity) ?? undefined;
+      let textsMap = new Map<string, string>();
+      let dryRunAiUsed = false;
+
+      const useAi = options.ai ?? config.ai?.enabled;
+      if (useAi) {
+        const aiOpts = buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel });
+        if (aiOpts) {
+          try {
+            const diff = await getDiffForRange({ commits: options.commits, since: options.since, tag: options.tag });
+            textsMap = await generateWithAi(ctx, adapters, aiOpts, verbosity, diff || undefined);
+            dryRunAiUsed = true;
+          } catch (err) {
+            console.error(`AI generation failed, using templates: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+
+      if (textsMap.size === 0) {
+        textsMap = generateAllPlatforms(ctx, adapters, verbosity);
+      }
+
       // Render dry-run preview
       render(
         <Box flexDirection="column" paddingX={1}>
           <Box marginBottom={1}>
             <Text bold color="yellow">[DRY RUN] Announce preview — no posts will be sent</Text>
           </Box>
+          {dryRunAiUsed && (
+            <Box marginBottom={1}>
+              <Text color="green" bold>✓ AI-generated content</Text>
+            </Box>
+          )}
           {changelog && (
             <Box marginBottom={1}>
               <Text dimColor>Changelog: {changelog.summary} ({changelog.range})</Text>
             </Box>
           )}
           {Array.from(adapters.entries()).map(([key, adapter]) => {
-            const text = generateForPlatform(ctx, key, adapter, (options.verbosity as Verbosity) ?? undefined);
+            const text = textsMap.get(key) ?? "";
             return (
               <Box key={key} flexDirection="column" marginBottom={1}>
                 <Box>

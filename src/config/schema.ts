@@ -62,6 +62,13 @@ export const BlogConfigSchema = z.object({
   language: z.string().optional(),
 });
 
+export const AiConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  provider: z.enum(["anthropic", "openai"]).default("anthropic"),
+  model: z.string().optional(),
+  api_key: z.string().optional(),
+});
+
 export const ScreenshotConfigSchema = z.object({
   viewport: z
     .object({
@@ -97,6 +104,7 @@ export const ConfigSchema = z.object({
     .default({}),
   defaults: DefaultsSchema.default({}),
   screenshot: ScreenshotConfigSchema.default({}),
+  ai: AiConfigSchema.default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -108,6 +116,7 @@ export type MediumConfig = z.infer<typeof MediumConfigSchema>;
 export type DiscordConfig = z.infer<typeof DiscordConfigSchema>;
 export type BlogConfig = z.infer<typeof BlogConfigSchema>;
 export type ScreenshotConfig = z.infer<typeof ScreenshotConfigSchema>;
+export type AiConfig = z.infer<typeof AiConfigSchema>;
 
 export const PLATFORM_NAMES = [
   "telegram",
