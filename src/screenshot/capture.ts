@@ -72,7 +72,10 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
   // Lazy-load Playwright
   let playwright;
   try {
-    playwright = await import("playwright");
+    // Use require.resolve to find playwright relative to this package,
+    // not the user's cwd
+    const playwrightPath = require.resolve("playwright", { paths: [import.meta.dir, process.cwd()] });
+    playwright = await import(playwrightPath);
   } catch {
     throw new Error(
       "Playwright is not installed.\n\n" +
