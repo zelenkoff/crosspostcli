@@ -31,6 +31,7 @@ interface PostCommandOptions {
   screenshotDelay?: number;
   screenshotPreset?: string;
   screenshotDark?: boolean;
+  headed?: boolean;
   blogSlug?: string;
   blogTitle?: string;
   telegram?: string;
@@ -60,6 +61,7 @@ async function resolveScreenshot(options: PostCommandOptions): Promise<Buffer | 
       device: options.screenshotDevice,
       delay: options.screenshotDelay,
       darkMode: options.screenshotDark,
+      headed: options.headed,
     });
   } else {
     captureOpts = {
@@ -70,6 +72,7 @@ async function resolveScreenshot(options: PostCommandOptions): Promise<Buffer | 
       device: options.screenshotDevice,
       delay: options.screenshotDelay,
       darkMode: options.screenshotDark,
+      headed: options.headed,
     };
   }
 
