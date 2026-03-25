@@ -590,7 +590,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         auth: options.auth,
       };
 
-      const result = await captureScreenshot(captureOpts);
+      // Per-screenshot timeout (45s) so one stuck page doesn't block the whole loop
+      const SCREENSHOT_TIMEOUT = 45_000;
+      const result = await Promise.race([
+        captureScreenshot(captureOpts),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Screenshot timed out after ${SCREENSHOT_TIMEOUT / 1000}s`)), SCREENSHOT_TIMEOUT),
+        ),
+      ]);
       captured.push({
         instruction,
         buffer: result.buffer,
@@ -598,7 +605,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         height: result.height,
       });
     } catch (err) {
-      // Skip failed screenshots but continue with others
+      // Skip failed/timed-out screenshots but continue with others
       emit("screenshotting", `Warning: Failed to capture screenshot ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }

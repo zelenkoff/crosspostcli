@@ -212,9 +212,14 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
 
     const page = await context.newPage();
 
+    // Use domcontentloaded instead of networkidle to avoid hanging on
+    // apps with persistent connections (websockets, SSE, polling).
+    // The post-navigation delay handles any remaining async rendering.
+    const waitStrategy = "domcontentloaded" as const;
+
     // Auth: login flow — fill form and submit before navigating to target
     if (auth?.login) {
-      await page.goto(auth.login.url, { waitUntil: "networkidle", timeout: 30_000 });
+      await page.goto(auth.login.url, { waitUntil: waitStrategy, timeout: 30_000 });
       await page.waitForTimeout(1000);
 
       for (const [selector, value] of Object.entries(auth.login.fields)) {
@@ -223,7 +228,7 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
 
       const submitSelector = auth.login.submit ?? 'button[type="submit"]';
       await Promise.all([
-        page.waitForNavigation({ waitUntil: "networkidle", timeout: 15_000 }).catch(() => {}),
+        page.waitForNavigation({ waitUntil: waitStrategy, timeout: 15_000 }).catch(() => {}),
         page.click(submitSelector),
       ]);
 
@@ -231,10 +236,10 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
     }
 
     // Navigate to target
-    await page.goto(options.url, { waitUntil: "networkidle", timeout: 30_000 });
+    await page.goto(options.url, { waitUntil: waitStrategy, timeout: 30_000 });
 
-    // Wait for additional delay
-    const delay = options.delay ?? 2000;
+    // Wait for additional delay (gives JS frameworks time to render after DOM is ready)
+    const delay = options.delay ?? 3000;
     if (delay > 0) {
       await page.waitForTimeout(delay);
     }

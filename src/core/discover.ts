@@ -154,7 +154,7 @@ export async function discoverFeatures(options: DiscoveryOptions): Promise<Disco
 
   try {
     // Take overview screenshot first
-    await page.goto(options.url, { waitUntil: "networkidle", timeout: 30_000 });
+    await page.goto(options.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await page.waitForTimeout(delay);
 
     // Hide unwanted elements
@@ -174,7 +174,7 @@ export async function discoverFeatures(options: DiscoveryOptions): Promise<Disco
       visited.add(normalizedCurrent);
 
       try {
-        await page.goto(currentUrl, { waitUntil: "networkidle", timeout: 15_000 });
+        await page.goto(currentUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
         await page.waitForTimeout(delay);
 
         if (options.hide && options.hide.length > 0) {
