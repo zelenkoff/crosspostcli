@@ -332,6 +332,226 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
   }
 }
 
+/**
+ * A reusable browser session for taking multiple screenshots without
+ * reopening the browser. Essential for headed mode where the user wants
+ * to watch one persistent browser window navigate between pages.
+ */
+export class BrowserSession {
+  private browser: any = null;
+  private context: any = null;
+  private page: any = null;
+  private authenticated = false;
+  private options: Partial<ScreenshotOptions> & { auth?: AuthOptions };
+  private viewport = { width: 1280, height: 800 };
+  private scaleFactor = 2;
+
+  constructor(options: Partial<ScreenshotOptions> & { auth?: AuthOptions }) {
+    this.options = options;
+  }
+
+  async init(): Promise<void> {
+    let playwright;
+    try {
+      const playwrightPath = require.resolve("playwright", { paths: [import.meta.dir, process.cwd()] });
+      playwright = await import(playwrightPath);
+    } catch {
+      throw new Error(
+        "Playwright is not installed.\n\n" +
+        "Run: crosspost screenshot --setup\n" +
+        "Or:  bun add playwright && bunx playwright install chromium"
+      );
+    }
+
+    const { chromium, devices } = playwright;
+
+    // Resolve device
+    let deviceConfig: Record<string, unknown> = {};
+    if (this.options.device) {
+      const normalizedDevice = this.options.device.toLowerCase().replace(/\s+/g, "-");
+      if (DEVICE_PRESETS[normalizedDevice]) {
+        deviceConfig = DEVICE_PRESETS[normalizedDevice];
+      } else if (devices[this.options.device]) {
+        deviceConfig = devices[this.options.device];
+      } else {
+        const match = Object.keys(devices).find(
+          (d: string) => d.toLowerCase().includes(normalizedDevice)
+        );
+        if (match) deviceConfig = devices[match];
+      }
+    }
+
+    this.viewport = this.options.viewport ??
+      (deviceConfig as { viewport?: { width: number; height: number } }).viewport ??
+      { width: 1280, height: 800 };
+
+    this.scaleFactor = this.options.scaleFactor ??
+      (deviceConfig as { deviceScaleFactor?: number }).deviceScaleFactor ?? 2;
+
+    const slowMo = this.options.slowMo ?? (this.options.headed ? 800 : 0);
+    this.browser = await chromium.launch({
+      headless: !this.options.headed,
+      ...(slowMo > 0 ? { slowMo } : {}),
+    });
+
+    const contextOptions: Record<string, unknown> = {
+      viewport: this.viewport,
+      deviceScaleFactor: this.scaleFactor,
+      ...(typeof deviceConfig === "object" ? deviceConfig : {}),
+    };
+
+    if (this.options.viewport) contextOptions.viewport = this.options.viewport;
+    if (this.options.darkMode) contextOptions.colorScheme = "dark";
+
+    const auth = this.options.auth;
+    if (auth?.storageState) contextOptions.storageState = auth.storageState;
+    if (auth?.httpCredentials) contextOptions.httpCredentials = auth.httpCredentials;
+    if (auth?.headers && Object.keys(auth.headers).length > 0) {
+      contextOptions.extraHTTPHeaders = auth.headers;
+    }
+
+    this.context = await this.browser.newContext(contextOptions);
+
+    if (auth?.cookies && auth.cookies.length > 0) {
+      await this.context.addCookies(auth.cookies);
+    }
+
+    this.page = await this.context.newPage();
+  }
+
+  /** Perform login flow (only runs once per session) */
+  private async authenticate(): Promise<void> {
+    if (this.authenticated) return;
+
+    const auth = this.options.auth;
+    if (!auth?.login) {
+      this.authenticated = true;
+      return;
+    }
+
+    const waitStrategy = "domcontentloaded" as const;
+    await this.page.goto(auth.login.url, { waitUntil: waitStrategy, timeout: 30_000 });
+    await this.page.waitForTimeout(1000);
+
+    for (const [selector, value] of Object.entries(auth.login.fields)) {
+      await this.page.fill(selector, value);
+    }
+
+    const submitSelector = auth.login.submit ?? 'button[type="submit"]';
+    await Promise.all([
+      this.page.waitForNavigation({ waitUntil: waitStrategy, timeout: 15_000 }).catch(() => {}),
+      this.page.click(submitSelector),
+    ]);
+
+    await this.page.waitForTimeout(auth.login.waitAfter ?? 3000);
+    this.authenticated = true;
+  }
+
+  /** Navigate to a URL and take a screenshot, reusing the same browser window */
+  async capture(opts: {
+    url: string;
+    selector?: string;
+    highlight?: string[];
+    hide?: string[];
+    delay?: number;
+    format?: "png" | "jpeg";
+    quality?: number;
+    fullPage?: boolean;
+  }): Promise<ScreenshotResult> {
+    if (!this.browser || !this.page) throw new Error("BrowserSession not initialized. Call init() first.");
+
+    // Authenticate on first use
+    await this.authenticate();
+
+    const waitStrategy = "domcontentloaded" as const;
+    await this.page.goto(opts.url, { waitUntil: waitStrategy, timeout: 30_000 });
+
+    const delay = opts.delay ?? this.options.delay ?? 3000;
+    if (delay > 0) {
+      await this.page.waitForTimeout(delay);
+    }
+
+    // Hide elements
+    const hideSelectors = opts.hide ?? this.options.hide ?? [];
+    if (hideSelectors.length > 0) {
+      for (const selector of hideSelectors) {
+        await this.page.evaluate((sel: string) => {
+          document.querySelectorAll(sel).forEach((el: any) => {
+            (el as any).style.display = "none";
+          });
+        }, selector);
+      }
+    }
+
+    // Highlight
+    const highlights = opts.highlight ?? [];
+    if (highlights.length > 0) {
+      for (const selector of highlights) {
+        await this.page.evaluate((sel: string) => {
+          document.querySelectorAll(sel).forEach((el: any) => {
+            (el as any).style.outline = "3px solid #FF4444";
+            (el as any).style.outlineOffset = "2px";
+          });
+        }, selector);
+      }
+      await this.page.waitForTimeout(200);
+    }
+
+    // Capture
+    const format = opts.format ?? this.options.format ?? "png";
+    const screenshotOptions: Record<string, unknown> = {
+      type: format,
+      fullPage: opts.fullPage ?? false,
+    };
+    if (format === "jpeg") {
+      screenshotOptions.quality = opts.quality ?? this.options.quality ?? 90;
+    }
+
+    let screenshotBuffer: Buffer;
+    if (opts.selector) {
+      const element = await this.page.$(opts.selector);
+      if (!element) throw new Error(`Element not found: "${opts.selector}"`);
+      screenshotBuffer = await element.screenshot(screenshotOptions) as Buffer;
+    } else {
+      screenshotBuffer = await this.page.screenshot(screenshotOptions) as Buffer;
+    }
+
+    let width = this.viewport.width;
+    let height = this.viewport.height;
+    if (opts.selector) {
+      const box = await this.page.$(opts.selector).then(async (el: any) => el?.boundingBox());
+      if (box) {
+        width = Math.round(box.width * this.scaleFactor);
+        height = Math.round(box.height * this.scaleFactor);
+      }
+    } else {
+      width = this.viewport.width * this.scaleFactor;
+      height = this.viewport.height * this.scaleFactor;
+    }
+
+    const outputPath = join(tmpdir(), `crosspost-screenshot-${Date.now()}.${format}`);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, screenshotBuffer);
+
+    return {
+      path: outputPath,
+      buffer: screenshotBuffer,
+      width,
+      height,
+      size: screenshotBuffer.length,
+      format,
+    };
+  }
+
+  async close(): Promise<void> {
+    try { await this.context?.close(); } catch {}
+    try { await this.browser?.close(); } catch {}
+    this.page = null;
+    this.context = null;
+    this.browser = null;
+  }
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;

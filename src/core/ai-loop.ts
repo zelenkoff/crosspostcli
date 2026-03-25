@@ -13,7 +13,7 @@ import type { Adapter } from "../adapters/types.js";
 import type { Changelog } from "./changelog.js";
 import type { AnnounceContext, Tone, Verbosity } from "./announce-templates.js";
 import type { AiGenerateOptions } from "./ai-generator.js";
-import type { ScreenshotOptions, ScreenshotResult, AuthOptions } from "../screenshot/capture.js";
+import type { ScreenshotOptions, AuthOptions } from "../screenshot/capture.js";
 import {
   DEFAULT_PLAN_SYSTEM_PROMPT,
   DEFAULT_COMPOSE_SYSTEM_PROMPT,
@@ -74,8 +74,13 @@ export interface AgentLoopOptions {
   maxScreenshots?: number;
   /** Custom system prompt to override the built-in defaults */
   systemPrompt?: string;
-  /** Called when the content plan is ready; return false to abort */
-  onPlanReady?: (plan: ContentPlan) => Promise<boolean>;
+  /**
+   * Called when the content plan is ready for user review.
+   * Return { action: "continue" } to proceed as-is.
+   * Return { action: "revise", feedback: "..." } to re-run analysis with feedback.
+   * Return { action: "abort" } to stop the agent loop.
+   */
+  onPlanReady?: (plan: ContentPlan) => Promise<{ action: "continue" | "revise" | "abort"; feedback?: string }>;
 }
 
 export type AgentPhase = "analyzing" | "planning" | "screenshotting" | "composing" | "done";
@@ -106,6 +111,7 @@ function buildAnalysisPrompt(
   appUrl: string,
   diff?: string,
   systemPrompt?: string,
+  revisionFeedback?: string,
 ): { system: string; user: string } {
   const system = resolveSystemPrompt(DEFAULT_ANALYSIS_SYSTEM_PROMPT, undefined, systemPrompt);
 
@@ -135,6 +141,13 @@ function buildAnalysisPrompt(
 
   if (diff) {
     parts.push(`\n## Code Diff (abbreviated)\n${diff.slice(0, 3000)}`);
+  }
+
+  if (revisionFeedback) {
+    parts.push(`\n## User Feedback on Previous Plan`);
+    parts.push(`The user reviewed your previous plan and wants these adjustments:`);
+    parts.push(revisionFeedback);
+    parts.push(`\nRevise the plan to incorporate this feedback.`);
   }
 
   parts.push(`\n## Instructions`);
@@ -513,32 +526,48 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   };
 
   // ── Pass 0: Analyze changes and create content plan ─────────────────
+  // Supports revision loop: user can provide feedback to adjust the plan.
 
-  emit("analyzing", "AI is analyzing changes and creating a content plan...");
+  let contentPlan: ContentPlan | null = null;
+  let revisionFeedback: string | undefined;
+  const MAX_REVISIONS = 3;
 
-  const analysisPrompt = buildAnalysisPrompt(context, appUrl, diff, options.systemPrompt);
-  let analysisRaw: string;
+  for (let revision = 0; revision <= MAX_REVISIONS; revision++) {
+    emit("analyzing", revision === 0
+      ? "AI is analyzing changes and creating a content plan..."
+      : `AI is revising the content plan (revision ${revision})...`);
 
-  if (aiOptions.provider === "openai") {
-    analysisRaw = await callOpenAIPlan(analysisPrompt, aiOptions);
-  } else {
-    analysisRaw = await callAnthropicPlan(analysisPrompt, aiOptions);
-  }
+    const analysisPrompt = buildAnalysisPrompt(context, appUrl, diff, options.systemPrompt, revisionFeedback);
+    let analysisRaw: string;
 
-  const contentPlan = parseAnalysisResponse(analysisRaw);
+    if (aiOptions.provider === "openai") {
+      analysisRaw = await callOpenAIPlan(analysisPrompt, aiOptions);
+    } else {
+      analysisRaw = await callAnthropicPlan(analysisPrompt, aiOptions);
+    }
 
-  if (contentPlan) {
+    contentPlan = parseAnalysisResponse(analysisRaw);
+
+    if (!contentPlan) {
+      emit("analyzing", "Could not parse content plan, proceeding with screenshot planning...");
+      break;
+    }
+
     emit("analyzing", `Content plan: ${contentPlan.narrativeAngle}`);
 
-    // Allow caller to review and potentially abort
+    // Allow caller to review and potentially revise or abort
     if (options.onPlanReady) {
-      const shouldContinue = await options.onPlanReady(contentPlan);
-      if (!shouldContinue) {
+      const result = await options.onPlanReady(contentPlan);
+      if (result.action === "abort") {
         throw new Error("Content plan rejected by user.");
       }
+      if (result.action === "revise" && result.feedback) {
+        revisionFeedback = result.feedback;
+        continue; // Re-run analysis with feedback
+      }
     }
-  } else {
-    emit("analyzing", "Could not parse content plan, proceeding with screenshot planning...");
+
+    break; // Plan accepted
   }
 
   // ── Pass 1: Plan screenshots ───────────────────────────────────────
@@ -565,49 +594,53 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   emit("planning", `AI planned ${plan.screenshots.length} screenshot(s): ${plan.reasoning.slice(0, 100)}`);
 
   // ── Execute: Capture screenshots ───────────────────────────────────
+  // Uses a single BrowserSession so headed mode shows one persistent window
+  // that navigates between pages (instead of opening/closing per screenshot).
 
   emit("screenshotting", `Capturing ${plan.screenshots.length} screenshot(s)...`);
 
-  const { captureScreenshot } = await import("../screenshot/capture.js");
+  const { BrowserSession } = await import("../screenshot/capture.js");
   const captured: CapturedScreenshot[] = [];
 
-  for (let i = 0; i < plan.screenshots.length; i++) {
-    const instruction = plan.screenshots[i];
-    emit("screenshotting", `[${i + 1}/${plan.screenshots.length}] ${instruction.description}`);
+  const session = new BrowserSession({
+    ...options.screenshotDefaults,
+    auth: options.auth,
+  });
 
-    try {
-      const captureOpts: ScreenshotOptions = {
-        url: instruction.url,
-        selector: instruction.selector,
-        highlight: instruction.highlight,
-        // Merge in defaults
-        ...options.screenshotDefaults,
-        // But always use the instruction's URL/selector/highlight
-        ...(instruction.url ? { url: instruction.url } : {}),
-        ...(instruction.selector ? { selector: instruction.selector } : {}),
-        ...(instruction.highlight ? { highlight: instruction.highlight } : {}),
-        // Auth is always passed through from the loop options
-        auth: options.auth,
-      };
+  try {
+    await session.init();
 
-      // Per-screenshot timeout (45s) so one stuck page doesn't block the whole loop
-      const SCREENSHOT_TIMEOUT = 45_000;
-      const result = await Promise.race([
-        captureScreenshot(captureOpts),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Screenshot timed out after ${SCREENSHOT_TIMEOUT / 1000}s`)), SCREENSHOT_TIMEOUT),
-        ),
-      ]);
-      captured.push({
-        instruction,
-        buffer: result.buffer,
-        width: result.width,
-        height: result.height,
-      });
-    } catch (err) {
-      // Skip failed/timed-out screenshots but continue with others
-      emit("screenshotting", `Warning: Failed to capture screenshot ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+    for (let i = 0; i < plan.screenshots.length; i++) {
+      const instruction = plan.screenshots[i];
+      emit("screenshotting", `[${i + 1}/${plan.screenshots.length}] ${instruction.description}`);
+
+      try {
+        // Per-screenshot timeout (45s) so one stuck page doesn't block the whole loop
+        const SCREENSHOT_TIMEOUT = 45_000;
+        const result = await Promise.race([
+          session.capture({
+            url: instruction.url,
+            selector: instruction.selector,
+            highlight: instruction.highlight,
+            hide: options.screenshotDefaults?.hide,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Screenshot timed out after ${SCREENSHOT_TIMEOUT / 1000}s`)), SCREENSHOT_TIMEOUT),
+          ),
+        ]);
+        captured.push({
+          instruction,
+          buffer: result.buffer,
+          width: result.width,
+          height: result.height,
+        });
+      } catch (err) {
+        // Skip failed/timed-out screenshots but continue with others
+        emit("screenshotting", `Warning: Failed to capture screenshot ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
+  } finally {
+    await session.close();
   }
 
   if (captured.length === 0) {

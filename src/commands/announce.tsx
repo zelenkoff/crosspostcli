@@ -79,7 +79,7 @@ export interface AnnounceCommandOptions {
   systemPrompt?: string;
 }
 
-type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "preview" | "posting" | "done" | "error";
+type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "posting" | "done" | "error";
 
 interface PlatformState {
   key: string;
@@ -107,6 +107,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [agentLoopResult, setAgentLoopResult] = useState<AgentLoopResult | null>(null);
   const [agentStatus, setAgentStatus] = useState<string>("");
   const [contentPlan, setContentPlan] = useState<ContentPlan | null>(null);
+  const [planFeedback, setPlanFeedback] = useState<string>("");
+  // Resolver for the agent loop's onPlanReady callback
+  const planResolverRef = React.useRef<((result: { action: "continue" | "revise" | "abort"; feedback?: string }) => void) | null>(null);
 
   // Handle keyboard input during preview phase
   useInput(
@@ -120,6 +123,42 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
       }
     },
     { isActive: phase === "preview" },
+  );
+
+  // Handle keyboard input during plan-review phase
+  useInput(
+    (input, key) => {
+      if (phase !== "plan-review") return;
+
+      if (key.return) {
+        const resolver = planResolverRef.current;
+        if (resolver) {
+          planResolverRef.current = null;
+          if (planFeedback.trim()) {
+            // User typed feedback — revise
+            resolver({ action: "revise", feedback: planFeedback.trim() });
+            setPlanFeedback("");
+            setPhase("agent-loop");
+          } else {
+            // Empty input — continue
+            resolver({ action: "continue" });
+            setPhase("agent-loop");
+          }
+        }
+      } else if (key.escape) {
+        const resolver = planResolverRef.current;
+        if (resolver) {
+          planResolverRef.current = null;
+          resolver({ action: "abort" });
+        }
+        process.exit(0);
+      } else if (key.backspace || key.delete) {
+        setPlanFeedback((prev) => prev.slice(0, -1));
+      } else if (input && !key.ctrl && !key.meta) {
+        setPlanFeedback((prev) => prev + input);
+      }
+    },
+    { isActive: phase === "plan-review" },
   );
 
   // Phase: Gather
@@ -332,7 +371,17 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           },
           onPlanReady: async (plan: ContentPlan) => {
             setContentPlan(plan);
-            return true; // auto-proceed in agent-loop mode
+
+            // In non-interactive mode (--no-confirm), auto-proceed
+            if (options.noConfirm) {
+              return { action: "continue" as const };
+            }
+
+            // Pause the agent loop and wait for user review
+            return new Promise((resolve) => {
+              planResolverRef.current = resolve;
+              setPhase("plan-review");
+            });
           },
         });
 
@@ -637,7 +686,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   if (phase === "agent-loop") {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <StepIndicator current={2} total={4} label="AI agent loop" />
+        <StepIndicator current={contentPlan ? 3 : 2} total={5} label="AI agent loop" />
         <Box marginTop={1}>
           <Text>
             <Text color="green"><Spinner type="dots" /></Text>
@@ -663,6 +712,44 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             <Text dimColor>{agentStatus}</Text>
           </Box>
         )}
+      </Box>
+    );
+  }
+
+  if (phase === "plan-review" && contentPlan) {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <StepIndicator current={2} total={5} label="Review content plan" />
+
+        <Box marginTop={1} flexDirection="column">
+          <Text bold color="cyan">Content Plan:</Text>
+          <Box marginLeft={2} flexDirection="column">
+            <Text><Text bold>Angle:</Text> {contentPlan.narrativeAngle}</Text>
+            <Text><Text bold>Audience:</Text> {contentPlan.targetAudience}</Text>
+            <Text><Text bold>Key changes:</Text></Text>
+            {contentPlan.keyChanges.map((change, i) => (
+              <Text key={i}>  - {change}</Text>
+            ))}
+            <Text><Text bold>Screenshot strategy:</Text> {contentPlan.screenshotStrategy}</Text>
+            {contentPlan.suggestedTone && (
+              <Text><Text bold>Tone:</Text> {contentPlan.suggestedTone}</Text>
+            )}
+          </Box>
+        </Box>
+
+        <Box marginTop={1} flexDirection="column">
+          {planFeedback.length > 0 && (
+            <Box>
+              <Text dimColor>Feedback: </Text>
+              <Text>{planFeedback}<Text color="green">|</Text></Text>
+            </Box>
+          )}
+          <Box marginTop={1}>
+            <Text dimColor>
+              Press <Text bold>Enter</Text> to continue, type feedback + <Text bold>Enter</Text> to revise, <Text bold>Esc</Text> to quit
+            </Text>
+          </Box>
+        </Box>
       </Box>
     );
   }
