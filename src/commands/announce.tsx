@@ -557,7 +557,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           only: options.only,
           exclude: options.exclude,
           blogSlug: options.blogSlug,
-          blogTitle: options.blogTitle ?? (context.version ? `${context.projectName} ${context.version}` : undefined),
+          blogTitle: options.blogTitle
+            ?? agentLoopResult?.titles.get("blog")
+            ?? (context.version ? `${context.projectName} ${context.version}` : undefined),
           perPlatformText: {},
         };
 

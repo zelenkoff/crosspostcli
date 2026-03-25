@@ -87,6 +87,8 @@ export type AgentPhase = "analyzing" | "planning" | "screenshotting" | "composin
 
 export interface AgentLoopResult {
   texts: Map<string, string>;
+  /** Per-platform titles (for blog/medium articles) */
+  titles: Map<string, string>;
   screenshots: CapturedScreenshot[];
   /** Per-platform screenshot indices (which screenshots to attach) */
   selectedScreenshots: Map<string, number[]>;
@@ -325,7 +327,16 @@ function buildComposePrompt(
   platformParts.push(`For Telegram: pick 1 main screenshot that best represents the update.`);
   platformParts.push(`For long-form platforms (Medium, Blog): pick multiple screenshots to place contextually within the article.`);
 
-  const keys = platforms.map((p) => `"${p.key}": {"text": "...", "screenshots": [0]}`).join(", ");
+  platformParts.push(`\n## Title Requirement`);
+  platformParts.push(`For long-form platforms (blog, medium): include a "title" field with a compelling, context-appropriate article title.`);
+  platformParts.push(`The title should reflect the actual content — not be generic. Keep it under 100 characters.`);
+
+  const keys = platforms.map((p) => {
+    const isLongForm = p.key === "blog" || p.key === "medium";
+    return isLongForm
+      ? `"${p.key}": {"title": "...", "text": "...", "screenshots": [0, 1]}`
+      : `"${p.key}": {"text": "...", "screenshots": [0]}`;
+  }).join(", ");
   platformParts.push(`\n## Output Format`);
   platformParts.push(`Return ONLY valid JSON, no markdown fences:`);
   platformParts.push(`{${keys}}`);
@@ -463,23 +474,27 @@ function parsePlanResponse(raw: string): ScreenshotPlan | null {
 function parseComposeResponse(
   raw: string,
   platformKeys: string[],
-): { texts: Map<string, string>; selectedScreenshots: Map<string, number[]> } | null {
+): { texts: Map<string, string>; titles: Map<string, string>; selectedScreenshots: Map<string, number[]> } | null {
   try {
     const parsed = JSON.parse(cleanJson(raw));
     const texts = new Map<string, string>();
+    const titles = new Map<string, string>();
     const selectedScreenshots = new Map<string, number[]>();
 
     for (const key of platformKeys) {
       const entry = parsed[key];
       if (!entry) continue;
 
-      // Support both { text, screenshots } and plain string
+      // Support both { text, screenshots, title } and plain string
       if (typeof entry === "string") {
         texts.set(key, entry);
         selectedScreenshots.set(key, [0]);
       } else if (typeof entry === "object") {
         if (typeof entry.text === "string" && entry.text.length > 0) {
           texts.set(key, entry.text);
+        }
+        if (typeof entry.title === "string" && entry.title.length > 0) {
+          titles.set(key, entry.title);
         }
         if (Array.isArray(entry.screenshots)) {
           selectedScreenshots.set(
@@ -491,7 +506,7 @@ function parseComposeResponse(
     }
 
     if (texts.size === 0) return null;
-    return { texts, selectedScreenshots };
+    return { texts, titles, selectedScreenshots };
   } catch {
     return null;
   }
@@ -697,6 +712,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
   return {
     texts: composed.texts,
+    titles: composed.titles,
     screenshots: captured,
     selectedScreenshots: composed.selectedScreenshots,
     plan,

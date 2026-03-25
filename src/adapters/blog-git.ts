@@ -44,12 +44,14 @@ export class BlogGitAdapter implements Adapter {
       const title = this.options?.title ?? content.text.split("\n")[0].slice(0, 100);
       const tags = this.options?.tags ?? [];
       const date = new Date().toISOString().split("T")[0];
+      const lang = content.language ?? this.config.language ?? "en";
 
       const frontmatter = [
         "---",
         `title: "${title.replace(/"/g, '\\"')}"`,
         `date: "${date}"`,
         `slug: "${slug}"`,
+        `language: "${lang}"`,
         tags.length > 0 ? `tags: [${tags.map((t) => `"${t}"`).join(", ")}]` : null,
         "---",
         "",
@@ -58,7 +60,8 @@ export class BlogGitAdapter implements Adapter {
         .join("\n");
 
       const body = content.markdown ?? content.text;
-      const filePath = join(postDir, `index.${ext}`);
+      const fileName = `${lang}.${ext}`;
+      const filePath = join(postDir, fileName);
       writeFileSync(filePath, frontmatter + body);
 
       // Copy images if provided
