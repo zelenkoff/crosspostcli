@@ -727,6 +727,74 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 }
 
 /**
+ * Re-compose content with user revision feedback, reusing existing screenshots.
+ */
+export async function reviseAgentContent(options: {
+  aiOptions: AiGenerateOptions;
+  context: AnnounceContext;
+  adapters: Map<string, Adapter>;
+  agentResult: AgentLoopResult;
+  feedback: string;
+  verbosity?: Verbosity;
+  diff?: string;
+  systemPrompt?: string;
+}): Promise<{ texts: Map<string, string>; titles: Map<string, string>; selectedScreenshots: Map<string, number[]> }> {
+  const { aiOptions, context, adapters, agentResult, feedback, verbosity, diff, systemPrompt } = options;
+
+  const platforms: PlatformConstraint[] = Array.from(adapters.entries()).map(([key, adapter]) => ({
+    key,
+    name: adapter.name,
+    maxTextLength: adapter.maxTextLength,
+    supportsImages: adapter.supportsImages,
+    supportsMarkdown: adapter.supportsMarkdown,
+    supportsHtml: adapter.supportsHtml,
+  }));
+
+  const composePrompt = buildComposePrompt(
+    context, platforms, agentResult.screenshots, verbosity, diff,
+    agentResult.contentPlan ?? undefined, systemPrompt,
+  );
+
+  // Append revision feedback to the last text content part
+  const revisionBlock = `\n\n## Revision Request\nThe user reviewed your previous output and wants changes. Here is what you generated before:\n\n` +
+    Array.from(agentResult.texts.entries()).map(([key, text]) => `### ${key}\n${text}`).join("\n\n") +
+    `\n\nUser feedback: ${feedback}\n\nPlease regenerate ALL platform posts, incorporating the user's feedback.`;
+
+  composePrompt.userContent.push({ type: "text", text: revisionBlock });
+
+  let composeRaw: string;
+  if (aiOptions.provider === "openai") {
+    composeRaw = await callOpenAICompose(composePrompt, aiOptions);
+  } else {
+    composeRaw = await callAnthropicCompose(composePrompt, aiOptions);
+  }
+
+  const platformKeys = Array.from(adapters.keys());
+  const composed = parseComposeResponse(composeRaw, platformKeys);
+  if (!composed) {
+    throw new Error("AI failed to revise posts. Raw response:\n" + composeRaw.slice(0, 500));
+  }
+
+  // Safety: truncate texts exceeding platform limits
+  for (const [key, adapter] of adapters) {
+    const text = composed.texts.get(key);
+    if (text && text.length > adapter.maxTextLength) {
+      composed.texts.set(key, text.slice(0, adapter.maxTextLength - 3) + "...");
+    }
+  }
+
+  // Validate screenshot indices
+  for (const [key, indices] of composed.selectedScreenshots) {
+    composed.selectedScreenshots.set(
+      key,
+      indices.filter((i) => i >= 0 && i < agentResult.screenshots.length),
+    );
+  }
+
+  return composed;
+}
+
+/**
  * Get the screenshots selected for a specific platform from the agent loop result.
  */
 export function getScreenshotsForPlatform(

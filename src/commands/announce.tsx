@@ -24,7 +24,7 @@ import { discoverFeatures, type DiscoveryResult, type DiscoveredFeature } from "
 import { readFileSync } from "fs";
 import { getDiffForRange } from "../core/changelog.js";
 import { generateWithAi, buildAiOptions } from "../core/ai-generator.js";
-import { runAgentLoop, getScreenshotsForPlatform, type AgentPhase, type AgentLoopResult, type ContentPlan } from "../core/ai-loop.js";
+import { runAgentLoop, reviseAgentContent, getScreenshotsForPlatform, type AgentPhase, type AgentLoopResult, type ContentPlan } from "../core/ai-loop.js";
 import type { AuthOptions } from "../screenshot/capture.js";
 
 export interface AnnounceCommandOptions {
@@ -79,7 +79,7 @@ export interface AnnounceCommandOptions {
   systemPrompt?: string;
 }
 
-type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "posting" | "done" | "error";
+type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "content-revise" | "revising" | "posting" | "done" | "error";
 
 interface PlatformState {
   key: string;
@@ -108,6 +108,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [agentStatus, setAgentStatus] = useState<string>("");
   const [contentPlan, setContentPlan] = useState<ContentPlan | null>(null);
   const [planFeedback, setPlanFeedback] = useState<string>("");
+  const [contentReviseInput, setContentReviseInput] = useState<string>("");
   // Resolver for the agent loop's onPlanReady callback
   const planResolverRef = React.useRef<((result: { action: "continue" | "revise" | "abort"; feedback?: string }) => void) | null>(null);
   // Guard: prevent the agent-loop useEffect from re-running while the loop is already in progress
@@ -122,6 +123,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         setPhase("posting");
       } else if (lower === "q" || key.escape) {
         process.exit(0);
+      } else if (lower === "e" && aiUsed) {
+        setContentReviseInput("");
+        setPhase("content-revise");
       }
     },
     { isActive: phase === "preview" },
@@ -167,6 +171,95 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
     },
     { isActive: phase === "plan-review" },
   );
+
+  // Handle keyboard input during content-revise phase
+  useInput(
+    (input, key) => {
+      if (phase !== "content-revise") return;
+
+      if (key.return) {
+        if (contentReviseInput.trim()) {
+          setPhase("revising");
+        }
+      } else if (key.escape) {
+        setPhase("preview");
+      } else if (key.backspace || key.delete) {
+        setContentReviseInput((prev) => prev.slice(0, -1));
+      } else if (input && !key.ctrl && !key.meta) {
+        setContentReviseInput((prev) => prev + input);
+      }
+    },
+    { isActive: phase === "content-revise" },
+  );
+
+  // Phase: Revising content with AI feedback
+  useEffect(() => {
+    if (phase !== "revising" || !context) return;
+    (async () => {
+      try {
+        const config = loadConfig();
+        const postOptions: PostOptions = { only: options.only, exclude: options.exclude };
+        const adapters = filterAdapters(createAdapters(config, postOptions), postOptions);
+        const aiOpts = buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel });
+
+        if (!aiOpts) {
+          setPhase("preview");
+          return;
+        }
+
+        const feedback = contentReviseInput.trim();
+
+        if (agentLoopResult) {
+          // Agent loop path: revise using screenshots
+          const revised = await reviseAgentContent({
+            aiOptions: aiOpts,
+            context,
+            adapters,
+            agentResult: agentLoopResult,
+            feedback,
+            verbosity: (options.verbosity as Verbosity) ?? undefined,
+            diff: undefined,
+            systemPrompt: options.systemPrompt,
+          });
+          setGeneratedTexts(revised.texts);
+          // Update the agent loop result titles if revised
+          if (revised.titles.size > 0) {
+            setAgentLoopResult({
+              ...agentLoopResult,
+              texts: revised.texts,
+              titles: revised.titles,
+              selectedScreenshots: revised.selectedScreenshots,
+            });
+          }
+        } else {
+          // Simple AI path: regenerate with feedback
+          const diff = await getDiffForRange({
+            commits: options.commits,
+            since: options.since,
+            tag: options.tag,
+          }).catch(() => null);
+
+          const texts = await generateWithAi(
+            context,
+            adapters,
+            aiOpts,
+            (options.verbosity as Verbosity) ?? undefined,
+            diff || undefined,
+            options.systemPrompt,
+            { previousTexts: generatedTexts, feedback },
+          );
+          setGeneratedTexts(texts);
+        }
+
+        setContentReviseInput("");
+        setPhase("preview");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setAiWarning(`AI revision failed: ${msg}. Keeping previous content.`);
+        setPhase("preview");
+      }
+    })();
+  }, [phase]);
 
   // Phase: Gather
   useEffect(() => {
@@ -768,6 +861,41 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
     );
   }
 
+  if (phase === "content-revise") {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <Box marginBottom={1}>
+          <Text bold color="yellow">Edit content:</Text>
+        </Box>
+        <Box>
+          <Text dimColor>What should be changed? </Text>
+          <Text>{contentReviseInput}<Text color="green">|</Text></Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text dimColor>
+            Type your feedback + <Text bold>Enter</Text> to revise, <Text bold>Esc</Text> to cancel
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (phase === "revising") {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <Box marginTop={1}>
+          <Text>
+            <Text color="green"><Spinner type="dots" /></Text>
+            {" "}Revising content with AI...
+          </Text>
+        </Box>
+        <Box marginLeft={3}>
+          <Text dimColor>Feedback: {contentReviseInput}</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   if (phase === "ai-generating") {
     return (
       <Box flexDirection="column" paddingX={1}>
@@ -886,7 +1014,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
                 <Text dimColor> ({charCount}/{maxLen} chars)</Text>
               </Box>
               <Box marginLeft={2}>
-                <Text>{text.length > 300 ? text.slice(0, 300) + "..." : text}</Text>
+                <Text>{text}</Text>
               </Box>
             </Box>
           );
@@ -894,7 +1022,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
 
         <Box marginTop={1}>
           <Text dimColor>
-            Press <Text bold>Enter</Text> or <Text bold>P</Text> to post, <Text bold>Q</Text> to quit
+            Press <Text bold>Enter</Text> or <Text bold>P</Text> to post{aiUsed ? <>, <Text bold>E</Text> to edit</> : ""}, <Text bold>Q</Text> to quit
           </Text>
         </Box>
       </Box>

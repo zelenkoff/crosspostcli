@@ -54,6 +54,7 @@ function buildPrompt(
   verbosity?: Verbosity,
   diff?: string,
   systemPrompt?: string,
+  revisionFeedback?: { previousTexts: Map<string, string>; feedback: string },
 ): { system: string; user: string } {
   const system = resolveSystemPrompt(DEFAULT_SIMPLE_SYSTEM_PROMPT, undefined, systemPrompt);
 
@@ -93,6 +94,16 @@ function buildPrompt(
   parts.push(`\n## Target Platforms`);
   parts.push("Generate a post for EACH of the following platforms. Respect the character limit strictly.\n");
   parts.push(buildPlatformInstructions(platforms.map((p) => ({ ...p, supportsImages: false }))));
+
+  if (revisionFeedback) {
+    parts.push(`\n## Revision Request`);
+    parts.push(`The user reviewed your previous output and wants changes. Here is what you generated before:\n`);
+    for (const [key, text] of revisionFeedback.previousTexts) {
+      parts.push(`### ${key}\n${text}\n`);
+    }
+    parts.push(`User feedback: ${revisionFeedback.feedback}`);
+    parts.push(`\nPlease regenerate ALL platform posts, incorporating the user's feedback.`);
+  }
 
   const keys = platforms.map((p) => `"${p.key}": "..."`).join(", ");
   parts.push(`\n## Output Format`);
@@ -174,6 +185,7 @@ export async function generateWithAi(
   verbosity?: Verbosity,
   diff?: string,
   systemPrompt?: string,
+  revisionFeedback?: { previousTexts: Map<string, string>; feedback: string },
 ): Promise<Map<string, string>> {
   const platforms: PlatformConstraint[] = Array.from(adapters.entries()).map(([key, adapter]) => ({
     key,
@@ -183,7 +195,7 @@ export async function generateWithAi(
     supportsHtml: adapter.supportsHtml,
   }));
 
-  const prompt = buildPrompt(ctx, platforms, verbosity, diff, systemPrompt);
+  const prompt = buildPrompt(ctx, platforms, verbosity, diff, systemPrompt, revisionFeedback);
 
   let raw: string;
   try {
