@@ -56,6 +56,8 @@ export interface ScreenshotOptions {
   storageState?: string;
   /** Run browser in headed mode (visible window) for debugging */
   headed?: boolean;
+  /** Slow down Playwright actions by this many ms (default: 800 when headed, 0 otherwise) */
+  slowMo?: number;
 }
 
 export interface ScreenshotResult {
@@ -161,7 +163,11 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
   const scaleFactor = options.scaleFactor ??
     (deviceConfig as { deviceScaleFactor?: number }).deviceScaleFactor ?? 2;
 
-  const browser = await chromium.launch({ headless: !options.headed });
+  const slowMo = options.slowMo ?? (options.headed ? 800 : 0);
+  const browser = await chromium.launch({
+    headless: !options.headed,
+    ...(slowMo > 0 ? { slowMo } : {}),
+  });
 
   try {
     const contextOptions: Record<string, unknown> = {

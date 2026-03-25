@@ -24,7 +24,7 @@ import { discoverFeatures, type DiscoveryResult, type DiscoveredFeature } from "
 import { readFileSync } from "fs";
 import { getDiffForRange } from "../core/changelog.js";
 import { generateWithAi, buildAiOptions } from "../core/ai-generator.js";
-import { runAgentLoop, getScreenshotsForPlatform, type AgentPhase, type AgentLoopResult } from "../core/ai-loop.js";
+import { runAgentLoop, getScreenshotsForPlatform, type AgentPhase, type AgentLoopResult, type ContentPlan } from "../core/ai-loop.js";
 import type { AuthOptions } from "../screenshot/capture.js";
 
 export interface AnnounceCommandOptions {
@@ -73,6 +73,10 @@ export interface AnnounceCommandOptions {
   auth?: AuthOptions;
   /** Run browser in headed mode (visible window) for debugging */
   headed?: boolean;
+  /** Slow down browser actions by this many ms (default: 800 when headed) */
+  slowMo?: number;
+  /** Custom system prompt for AI content generation */
+  systemPrompt?: string;
 }
 
 type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "preview" | "posting" | "done" | "error";
@@ -102,6 +106,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [aiWarning, setAiWarning] = useState<string | null>(null);
   const [agentLoopResult, setAgentLoopResult] = useState<AgentLoopResult | null>(null);
   const [agentStatus, setAgentStatus] = useState<string>("");
+  const [contentPlan, setContentPlan] = useState<ContentPlan | null>(null);
 
   // Handle keyboard input during preview phase
   useInput(
@@ -317,15 +322,22 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             hide: options.screenshotHide,
             delay: options.screenshotDelay,
             headed: options.headed,
+            slowMo: options.slowMo,
           },
           maxScreenshots: options.discoverMaxPages ?? 4,
           auth: options.auth,
+          systemPrompt: options.systemPrompt,
           onStatus: (_phase: AgentPhase, detail: string) => {
             setAgentStatus(detail);
+          },
+          onPlanReady: async (plan: ContentPlan) => {
+            setContentPlan(plan);
+            return true; // auto-proceed in agent-loop mode
           },
         });
 
         setAgentLoopResult(result);
+        if (result.contentPlan) setContentPlan(result.contentPlan);
         setGeneratedTexts(result.texts);
         setAiUsed(true);
 
@@ -425,7 +437,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           tag: options.tag,
         });
 
-        const texts = await generateWithAi(context, adapters, aiOpts, verbosity, diff || undefined);
+        const texts = await generateWithAi(context, adapters, aiOpts, verbosity, diff || undefined, options.systemPrompt);
         setGeneratedTexts(texts);
         setAiUsed(true);
         setPhase("preview");
@@ -632,6 +644,20 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             {" "}AI is analyzing, screenshotting, and composing...
           </Text>
         </Box>
+        {contentPlan && (
+          <Box marginTop={1} marginLeft={2} flexDirection="column">
+            <Text bold color="cyan">Content Plan:</Text>
+            <Box marginLeft={2} flexDirection="column">
+              <Text><Text bold>Angle:</Text> {contentPlan.narrativeAngle}</Text>
+              <Text><Text bold>Audience:</Text> {contentPlan.targetAudience}</Text>
+              <Text><Text bold>Key changes:</Text></Text>
+              {contentPlan.keyChanges.map((change, i) => (
+                <Text key={i}>  - {change}</Text>
+              ))}
+              <Text><Text bold>Screenshot strategy:</Text> {contentPlan.screenshotStrategy}</Text>
+            </Box>
+          </Box>
+        )}
         {agentStatus && (
           <Box marginLeft={3} marginTop={1}>
             <Text dimColor>{agentStatus}</Text>
@@ -663,6 +689,19 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
     return (
       <Box flexDirection="column" paddingX={1}>
         <StepIndicator current={options.discover ? 4 : 3} total={options.discover ? 5 : 4} label="Review content" />
+
+        {contentPlan && (
+          <Box marginTop={1} marginBottom={1} flexDirection="column">
+            <Text color="green" bold>Content Plan</Text>
+            <Box marginLeft={2} flexDirection="column">
+              <Text><Text bold>Angle:</Text> {contentPlan.narrativeAngle}</Text>
+              <Text><Text bold>Audience:</Text> {contentPlan.targetAudience}</Text>
+              {contentPlan.keyChanges.map((change, i) => (
+                <Text key={i} dimColor>  - {change}</Text>
+              ))}
+            </Box>
+          </Box>
+        )}
 
         {agentLoopResult && (
           <Box marginTop={1} marginBottom={1} flexDirection="column">

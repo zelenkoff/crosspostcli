@@ -14,6 +14,13 @@ import type { Changelog } from "./changelog.js";
 import type { AnnounceContext, Tone, Verbosity } from "./announce-templates.js";
 import type { AiGenerateOptions } from "./ai-generator.js";
 import type { ScreenshotOptions, ScreenshotResult, AuthOptions } from "../screenshot/capture.js";
+import {
+  DEFAULT_PLAN_SYSTEM_PROMPT,
+  DEFAULT_COMPOSE_SYSTEM_PROMPT,
+  DEFAULT_ANALYSIS_SYSTEM_PROMPT,
+  buildPlatformInstructions,
+  resolveSystemPrompt,
+} from "./platform-prompts.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -36,6 +43,20 @@ export interface CapturedScreenshot {
   height: number;
 }
 
+/** Content plan produced by the analysis phase */
+export interface ContentPlan {
+  /** Key changes explained in plain language */
+  keyChanges: string[];
+  /** The narrative angle for the announcement */
+  narrativeAngle: string;
+  /** Target audience for this announcement */
+  targetAudience: string;
+  /** What UI elements to look for and why */
+  screenshotStrategy: string;
+  /** Suggested tone observations */
+  suggestedTone: string;
+}
+
 export interface AgentLoopOptions {
   aiOptions: AiGenerateOptions;
   context: AnnounceContext;
@@ -51,9 +72,13 @@ export interface AgentLoopOptions {
   onStatus?: (phase: AgentPhase, detail: string) => void;
   /** Max screenshots to capture (default: 4) */
   maxScreenshots?: number;
+  /** Custom system prompt to override the built-in defaults */
+  systemPrompt?: string;
+  /** Called when the content plan is ready; return false to abort */
+  onPlanReady?: (plan: ContentPlan) => Promise<boolean>;
 }
 
-export type AgentPhase = "planning" | "screenshotting" | "composing" | "done";
+export type AgentPhase = "analyzing" | "planning" | "screenshotting" | "composing" | "done";
 
 export interface AgentLoopResult {
   texts: Map<string, string>;
@@ -61,6 +86,8 @@ export interface AgentLoopResult {
   /** Per-platform screenshot indices (which screenshots to attach) */
   selectedScreenshots: Map<string, number[]>;
   plan: ScreenshotPlan;
+  /** Content plan from the analysis phase */
+  contentPlan?: ContentPlan;
 }
 
 // ── Prompt Builders ────────────────────────────────────────────────────
@@ -74,20 +101,16 @@ interface PlatformConstraint {
   supportsHtml: boolean;
 }
 
-function buildPlanPrompt(
+function buildAnalysisPrompt(
   ctx: AnnounceContext,
   appUrl: string,
   diff?: string,
+  systemPrompt?: string,
 ): { system: string; user: string } {
-  const system =
-    "You are an expert developer advocate. You analyze software changes and decide which parts of a running application " +
-    "would be most visually compelling to screenshot for social media announcements. " +
-    "You think about what would catch a developer's eye and make them want to try the product. " +
-    "You return JSON only.";
+  const system = resolveSystemPrompt(DEFAULT_ANALYSIS_SYSTEM_PROMPT, undefined, systemPrompt);
 
   const parts: string[] = [];
-
-  parts.push("Analyze the following software update and decide what screenshots to take from the running app.\n");
+  parts.push("Analyze the following software update and create a content plan for social media announcements.\n");
 
   parts.push(`## App URL\n${appUrl}`);
   parts.push(`## Project: ${ctx.projectName}${ctx.version ? ` ${ctx.version}` : ""}`);
@@ -115,7 +138,74 @@ function buildPlanPrompt(
   }
 
   parts.push(`\n## Instructions`);
-  parts.push(`Based on the changes above, decide which pages/sections of the app at ${appUrl} would make the best screenshots for a social media announcement.`);
+  parts.push(`Analyze these changes and create a content plan. Think about:`);
+  parts.push(`- What are the key changes in plain language? What would a user notice?`);
+  parts.push(`- What's the best narrative angle for the announcement?`);
+  parts.push(`- Who is the target audience? What do they care about?`);
+  parts.push(`- What UI elements in the app at ${appUrl} would best illustrate these changes?`);
+  parts.push(`- What tone fits this type of update?`);
+
+  parts.push(`\n## Output Format`);
+  parts.push(`Return ONLY valid JSON, no markdown fences:`);
+  parts.push(`{`);
+  parts.push(`  "keyChanges": ["change 1 in plain language", "change 2", ...],`);
+  parts.push(`  "narrativeAngle": "the story/angle for the announcement",`);
+  parts.push(`  "targetAudience": "who cares about this and why",`);
+  parts.push(`  "screenshotStrategy": "what UI elements to look for and why",`);
+  parts.push(`  "suggestedTone": "tone observations for this update"`);
+  parts.push(`}`);
+
+  return { system, user: parts.join("\n") };
+}
+
+function buildPlanPrompt(
+  ctx: AnnounceContext,
+  appUrl: string,
+  diff?: string,
+  contentPlan?: ContentPlan,
+  systemPrompt?: string,
+): { system: string; user: string } {
+  const system = resolveSystemPrompt(DEFAULT_PLAN_SYSTEM_PROMPT, undefined, systemPrompt);
+
+  const parts: string[] = [];
+
+  parts.push("Decide what screenshots to take from the running app for a social media announcement.\n");
+
+  parts.push(`## App URL\n${appUrl}`);
+  parts.push(`## Project: ${ctx.projectName}${ctx.version ? ` ${ctx.version}` : ""}`);
+
+  if (contentPlan) {
+    parts.push(`\n## Content Plan (from analysis phase)`);
+    parts.push(`Key changes: ${contentPlan.keyChanges.join("; ")}`);
+    parts.push(`Narrative angle: ${contentPlan.narrativeAngle}`);
+    parts.push(`Target audience: ${contentPlan.targetAudience}`);
+    parts.push(`Screenshot strategy: ${contentPlan.screenshotStrategy}`);
+  }
+
+  if (ctx.description) {
+    parts.push(`\n## Description\n${ctx.description}`);
+  }
+
+  if (ctx.changelog) {
+    parts.push(`\n## Changes`);
+    if (ctx.changelog.features.length > 0) {
+      parts.push("Features:\n" + ctx.changelog.features.map((c) => `- ${c.subject}${c.body ? ` — ${c.body.split("\n")[0]}` : ""}`).join("\n"));
+    }
+    if (ctx.changelog.fixes.length > 0) {
+      parts.push("Bug fixes:\n" + ctx.changelog.fixes.map((c) => `- ${c.subject}`).join("\n"));
+    }
+    if (ctx.changelog.other.length > 0) {
+      parts.push("Other:\n" + ctx.changelog.other.map((c) => `- ${c.subject}`).join("\n"));
+    }
+    parts.push(`Summary: ${ctx.changelog.summary}`);
+  }
+
+  if (diff) {
+    parts.push(`\n## Code Diff (abbreviated)\n${diff.slice(0, 3000)}`);
+  }
+
+  parts.push(`\n## Instructions`);
+  parts.push(`Based on the analysis above, decide which pages/sections of the app at ${appUrl} would make the best screenshots.`);
   parts.push(`Think about:`);
   parts.push(`- What UI changes are most visually interesting?`);
   parts.push(`- What would make a developer stop scrolling?`);
@@ -140,14 +230,10 @@ function buildComposePrompt(
   screenshots: CapturedScreenshot[],
   verbosity?: Verbosity,
   diff?: string,
+  contentPlan?: ContentPlan,
+  systemPrompt?: string,
 ): { system: string; userContent: Array<{ type: "text"; text: string } | { type: "image"; source: { type: "base64"; media_type: string; data: string } }> } {
-  const system =
-    "You are a developer relations copywriter. You write social media announcements for software releases. " +
-    "You are looking at actual screenshots of the application you're writing about. " +
-    "Write posts that naturally reference what's visible in the screenshots — describe what users will see, " +
-    "point out visual details, make the reader feel like they're looking at the app. " +
-    "You never use hashtags unless explicitly asked. You focus on what matters to users. " +
-    "You return JSON only.";
+  const system = resolveSystemPrompt(DEFAULT_COMPOSE_SYSTEM_PROMPT, undefined, systemPrompt);
 
   const contentParts: Array<{ type: "text"; text: string } | { type: "image"; source: { type: "base64"; media_type: string; data: string } }> = [];
 
@@ -179,6 +265,13 @@ function buildComposePrompt(
     textParts.push(`\n## Diff Context (abbreviated)\n${diff.slice(0, 2000)}`);
   }
 
+  if (contentPlan) {
+    textParts.push(`\n## Content Plan (from analysis phase)`);
+    textParts.push(`Key changes: ${contentPlan.keyChanges.join("; ")}`);
+    textParts.push(`Narrative angle: ${contentPlan.narrativeAngle}`);
+    textParts.push(`Target audience: ${contentPlan.targetAudience}`);
+  }
+
   textParts.push(`\n## Tone\n${ctx.tone}`);
 
   if (verbosity) {
@@ -206,20 +299,18 @@ function buildComposePrompt(
     });
   }
 
-  // Platform instructions and output format
+  // Platform instructions with rich per-platform formatting rules
   const platformParts: string[] = [];
   platformParts.push(`\n## Target Platforms`);
   platformParts.push("Generate a post for EACH platform. Reference the screenshots naturally — describe what's visible. Respect character limits.\n");
-  for (const p of platforms) {
-    const formatting = p.supportsMarkdown ? "supports markdown" : p.supportsHtml ? "supports HTML" : "plain text only";
-    const imageNote = p.supportsImages ? "images supported" : "no image support";
-    platformParts.push(`- ${p.name} (key: "${p.key}"): max ${p.maxTextLength} chars, ${formatting}, ${imageNote}`);
-  }
+  platformParts.push(buildPlatformInstructions(platforms));
 
   platformParts.push(`\n## Screenshot Selection`);
   platformParts.push(`For each platform, also pick which screenshot(s) to attach (by index, 0-based).`);
   platformParts.push(`Platforms that don't support images should get an empty array.`);
-  platformParts.push(`Pick the most impactful screenshot(s) — usually 1-2 is best for social media.`);
+  platformParts.push(`For short-form platforms (X, Bluesky, Mastodon): pick 1 most impactful screenshot.`);
+  platformParts.push(`For Telegram: pick 1 main screenshot that best represents the update.`);
+  platformParts.push(`For long-form platforms (Medium, Blog): pick multiple screenshots to place contextually within the article.`);
 
   const keys = platforms.map((p) => `"${p.key}": {"text": "...", "screenshots": [0]}`).join(", ");
   platformParts.push(`\n## Output Format`);
@@ -393,6 +484,24 @@ function parseComposeResponse(
   }
 }
 
+// ── Analysis Parser ─────────────────────────────────────────────────────
+
+function parseAnalysisResponse(raw: string): ContentPlan | null {
+  try {
+    const parsed = JSON.parse(cleanJson(raw));
+    if (!Array.isArray(parsed.keyChanges) || typeof parsed.narrativeAngle !== "string") return null;
+    return {
+      keyChanges: parsed.keyChanges.filter((c: unknown) => typeof c === "string"),
+      narrativeAngle: parsed.narrativeAngle,
+      targetAudience: typeof parsed.targetAudience === "string" ? parsed.targetAudience : "",
+      screenshotStrategy: typeof parsed.screenshotStrategy === "string" ? parsed.screenshotStrategy : "",
+      suggestedTone: typeof parsed.suggestedTone === "string" ? parsed.suggestedTone : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ── Main Loop ──────────────────────────────────────────────────────────
 
 export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
@@ -403,11 +512,40 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     if (onStatus) onStatus(phase, detail);
   };
 
+  // ── Pass 0: Analyze changes and create content plan ─────────────────
+
+  emit("analyzing", "AI is analyzing changes and creating a content plan...");
+
+  const analysisPrompt = buildAnalysisPrompt(context, appUrl, diff, options.systemPrompt);
+  let analysisRaw: string;
+
+  if (aiOptions.provider === "openai") {
+    analysisRaw = await callOpenAIPlan(analysisPrompt, aiOptions);
+  } else {
+    analysisRaw = await callAnthropicPlan(analysisPrompt, aiOptions);
+  }
+
+  const contentPlan = parseAnalysisResponse(analysisRaw);
+
+  if (contentPlan) {
+    emit("analyzing", `Content plan: ${contentPlan.narrativeAngle}`);
+
+    // Allow caller to review and potentially abort
+    if (options.onPlanReady) {
+      const shouldContinue = await options.onPlanReady(contentPlan);
+      if (!shouldContinue) {
+        throw new Error("Content plan rejected by user.");
+      }
+    }
+  } else {
+    emit("analyzing", "Could not parse content plan, proceeding with screenshot planning...");
+  }
+
   // ── Pass 1: Plan screenshots ───────────────────────────────────────
 
-  emit("planning", "AI is analyzing changes and planning screenshots...");
+  emit("planning", "AI is planning screenshots...");
 
-  const planPrompt = buildPlanPrompt(context, appUrl, diff);
+  const planPrompt = buildPlanPrompt(context, appUrl, diff, contentPlan ?? undefined, options.systemPrompt);
   let planRaw: string;
 
   if (aiOptions.provider === "openai") {
@@ -484,7 +622,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     supportsHtml: adapter.supportsHtml,
   }));
 
-  const composePrompt = buildComposePrompt(context, platforms, captured, verbosity, diff);
+  const composePrompt = buildComposePrompt(context, platforms, captured, verbosity, diff, contentPlan ?? undefined, options.systemPrompt);
   let composeRaw: string;
 
   if (aiOptions.provider === "openai") {
@@ -522,6 +660,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     screenshots: captured,
     selectedScreenshots: composed.selectedScreenshots,
     plan,
+    contentPlan: contentPlan ?? undefined,
   };
 }
 

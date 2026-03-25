@@ -179,6 +179,9 @@ program
   .option("--auth-login-fields <fields>", "Login form fields as JSON (e.g., '{\"#email\":\"user@example.com\",\"#password\":\"secret\"}')")
   .option("--auth-login-submit <selector>", "Login submit button selector (default: button[type=submit])")
   .option("--headed", "Run browser in headed mode (visible window) for debugging")
+  .option("--slow-mo <ms>", "Slow down browser actions by ms (default: 800 when --headed)", parseInt)
+  .option("--system-prompt <prompt>", "Custom system prompt for AI content generation")
+  .option("--system-prompt-file <path>", "Read system prompt from a file")
   .action(async (description, opts) => {
     // Build auth options from CLI flags
     const auth: Record<string, unknown> = {};
@@ -219,10 +222,18 @@ program
       }
     }
 
+    // Resolve system prompt from file if specified
+    let systemPrompt = opts.systemPrompt;
+    if (!systemPrompt && opts.systemPromptFile) {
+      const { readFileSync } = await import("fs");
+      systemPrompt = readFileSync(opts.systemPromptFile, "utf-8").trim();
+    }
+
     await runAnnounceCommand({
       description,
       ...opts,
       auth: hasAuth ? auth : undefined,
+      systemPrompt,
     });
   });
 

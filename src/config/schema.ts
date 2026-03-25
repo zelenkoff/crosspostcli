@@ -67,6 +67,8 @@ export const AiConfigSchema = z.object({
   provider: z.enum(["anthropic", "openai"]).default("anthropic"),
   model: z.string().optional(),
   api_key: z.string().optional(),
+  /** Custom system prompt for AI content generation */
+  system_prompt: z.string().optional(),
 });
 
 export const ScreenshotConfigSchema = z.object({
