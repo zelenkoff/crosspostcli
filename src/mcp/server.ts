@@ -7,6 +7,10 @@ import { PLATFORM_NAMES } from "../config/schema.js";
 import { captureScreenshot, formatSize, listDevices, type ScreenshotOptions } from "../screenshot/capture.js";
 import { checkSetup } from "../screenshot/setup.js";
 import { readFileSync } from "fs";
+import { getCommitRange, getProjectName, getDiffForRange } from "../core/changelog.js";
+import { detectTemplate, type Tone, type Verbosity } from "../core/announce-templates.js";
+import { buildAiOptions } from "../core/ai-generator.js";
+import { runAgentLoop, getScreenshotsForPlatform } from "../core/ai-loop.js";
 
 const VERSION = "0.1.0";
 
@@ -399,6 +403,243 @@ export function createMcpServer() {
           text: `Available device presets:\n${devices.map((d) => `  - ${d}`).join("\n")}\n\nPlaywright device names are also supported.`,
         }],
       };
+    },
+  );
+
+  // ── Tool: smart_announce ────────────────────────────────────────────
+
+  server.tool(
+    "smart_announce",
+    "AI-driven announcement: analyzes changes, decides what to screenshot from a running app, captures screenshots, " +
+    "then writes platform-optimized posts that reference the visuals. The AI sees the actual screenshots and writes " +
+    "about what's visible. Requires: AI API key configured, Playwright installed, and the app running at the given URL.",
+    {
+      app_url: z.string().describe("URL of the running app to screenshot"),
+      description: z.string().optional().describe("What the update is about (optional if using git)"),
+      from_git: z.boolean().optional().describe("Parse recent git commits for changelog (default: true)"),
+      commits: z.string().optional().describe("Number of commits or git range (e.g., '10' or 'v1.0..HEAD')"),
+      since: z.string().optional().describe("Include commits since this date (e.g., '2026-03-01')"),
+      tag: z.string().optional().describe("Include commits since this tag"),
+      project_name: z.string().optional().describe("Project name (auto-detected from git if omitted)"),
+      version: z.string().optional().describe("Version string (e.g., 'v2.1.0')"),
+      url: z.string().optional().describe("Project URL to include in posts"),
+      tone: z.enum(["professional", "casual", "excited"]).optional().describe("Writing tone (default: casual)"),
+      verbosity: z.enum(["brief", "normal", "detailed"]).optional().describe("Content verbosity (default: normal)"),
+      platforms: z.string().optional().describe("Comma-separated platform names (default: all configured)"),
+      exclude: z.string().optional().describe("Comma-separated platforms to skip"),
+      screenshot_device: z.string().optional().describe("Device preset for screenshots (e.g., 'macbook-pro')"),
+      screenshot_dark_mode: z.boolean().optional().describe("Use dark mode for screenshots"),
+      screenshot_hide: z.array(z.string()).optional().describe("CSS selectors to hide in screenshots"),
+      screenshot_delay: z.number().optional().describe("Delay in ms before each screenshot capture"),
+      max_screenshots: z.number().optional().describe("Max screenshots to capture (default: 4)"),
+      dry_run: z.boolean().optional().describe("Preview without posting"),
+      ai_provider: z.string().optional().describe("AI provider override (anthropic or openai)"),
+      ai_model: z.string().optional().describe("AI model override"),
+    },
+    async (params) => {
+      // Preflight checks
+      const setup = checkSetup();
+      if (!setup.installed) {
+        return {
+          content: [{ type: "text", text: "Playwright is not installed. Run `crosspost screenshot --setup` to install it." }],
+          isError: true,
+        };
+      }
+
+      if (!configExists()) {
+        return {
+          content: [{ type: "text", text: "CrossPost is not configured. Run `crosspost init` to set up platforms." }],
+          isError: true,
+        };
+      }
+
+      const config = loadConfig();
+
+      // Build AI options
+      const aiOpts = buildAiOptions(config.ai, {
+        provider: params.ai_provider,
+        model: params.ai_model,
+      });
+      if (!aiOpts) {
+        return {
+          content: [{ type: "text", text: "AI API key not configured. Run `crosspost init` and set up AI to use smart_announce." }],
+          isError: true,
+        };
+      }
+
+      // Build adapters
+      const postOptions: PostOptions = {
+        only: params.platforms?.split(",").map((s) => s.trim()),
+        exclude: params.exclude?.split(",").map((s) => s.trim()),
+      };
+      const allAdapters = createAdapters(config, postOptions);
+      const adapters = filterAdapters(allAdapters, postOptions);
+
+      if (adapters.size === 0) {
+        return {
+          content: [{ type: "text", text: "No platforms configured or all filtered out." }],
+          isError: true,
+        };
+      }
+
+      // Gather context
+      let changelog;
+      const useGit = params.from_git !== false;
+      if (useGit) {
+        try {
+          changelog = await getCommitRange({
+            commits: params.commits,
+            since: params.since,
+            tag: params.tag,
+          });
+        } catch {
+          // Git not available, continue without changelog
+        }
+      }
+
+      const projectName = params.project_name ?? (await getProjectName().catch(() => "Project"));
+      const tone = (params.tone ?? "casual") as Tone;
+      const template = detectTemplate(changelog);
+
+      const context = {
+        projectName,
+        version: params.version,
+        description: params.description,
+        changelog,
+        url: params.url,
+        tone,
+        template,
+      };
+
+      if (!params.description && !changelog) {
+        return {
+          content: [{ type: "text", text: "No description or git history available. Provide a description or ensure you're in a git repository." }],
+          isError: true,
+        };
+      }
+
+      // Get diff for extra context
+      let diff: string | undefined;
+      if (useGit) {
+        try {
+          diff = await getDiffForRange({ commits: params.commits, since: params.since, tag: params.tag }) || undefined;
+        } catch {
+          // Continue without diff
+        }
+      }
+
+      // Status messages collected for the response
+      const statusLog: string[] = [];
+
+      try {
+        // Run the agentic loop
+        const result = await runAgentLoop({
+          aiOptions: aiOpts,
+          context,
+          appUrl: params.app_url,
+          adapters,
+          verbosity: params.verbosity as Verbosity | undefined,
+          diff,
+          screenshotDefaults: {
+            device: params.screenshot_device,
+            darkMode: params.screenshot_dark_mode,
+            hide: params.screenshot_hide,
+            delay: params.screenshot_delay,
+          },
+          maxScreenshots: params.max_screenshots,
+          onStatus: (_phase, detail) => {
+            statusLog.push(detail);
+          },
+        });
+
+        // Dry run: return preview
+        if (params.dry_run) {
+          const preview = Array.from(adapters.entries()).map(([key, adapter]) => ({
+            platform: key,
+            text: result.texts.get(key) ?? "",
+            charCount: (result.texts.get(key) ?? "").length,
+            maxLength: adapter.maxTextLength,
+            screenshotIndices: result.selectedScreenshots.get(key) ?? [],
+          }));
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dryRun: true,
+                plan: {
+                  reasoning: result.plan.reasoning,
+                  screenshots: result.plan.screenshots.map((s) => s.description),
+                },
+                screenshotsCaptured: result.screenshots.length,
+                platforms: preview,
+                statusLog,
+              }, null, 2),
+            }],
+          };
+        }
+
+        // Post to all platforms with per-platform text and screenshots
+        const postOpts: PostOptions = {
+          ...postOptions,
+          perPlatformText: {},
+        };
+
+        for (const [key] of adapters) {
+          if (result.texts.has(key)) {
+            postOpts.perPlatformText![key] = result.texts.get(key)!;
+          }
+        }
+
+        // Use the first platform's screenshots as the default image set
+        // (postToAll sends the same images to all platforms)
+        const bestScreenshots = result.screenshots.length > 0
+          ? [result.screenshots[0].buffer]
+          : [];
+
+        const defaultText = context.description ?? changelog?.summary ?? "Update";
+        const postResults = await postToAll(
+          adapters,
+          { text: defaultText, images: bestScreenshots.length > 0 ? bestScreenshots : undefined, url: context.url },
+          postOpts,
+        );
+
+        const succeeded = postResults.filter((r) => r.success).length;
+        const failed = postResults.filter((r) => !r.success).length;
+        const summary = postResults.map((r) => ({
+          platform: r.platform,
+          success: r.success,
+          url: r.url,
+          channel: r.channel,
+          error: r.error,
+          durationMs: r.durationMs,
+        }));
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              plan: {
+                reasoning: result.plan.reasoning,
+                screenshots: result.plan.screenshots.map((s) => s.description),
+              },
+              screenshotsCaptured: result.screenshots.length,
+              posted: `${succeeded} succeeded, ${failed} failed`,
+              results: summary,
+              statusLog,
+            }, null, 2),
+          }],
+          isError: failed > 0 && succeeded === 0,
+        };
+      } catch (err) {
+        return {
+          content: [{
+            type: "text",
+            text: `Smart announce failed: ${err instanceof Error ? err.message : String(err)}\n\nStatus log:\n${statusLog.join("\n")}`,
+          }],
+          isError: true,
+        };
+      }
     },
   );
 

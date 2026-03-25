@@ -24,6 +24,7 @@ import { discoverFeatures, type DiscoveryResult, type DiscoveredFeature } from "
 import { readFileSync } from "fs";
 import { getDiffForRange } from "../core/changelog.js";
 import { generateWithAi, buildAiOptions } from "../core/ai-generator.js";
+import { runAgentLoop, getScreenshotsForPlatform, type AgentPhase, type AgentLoopResult } from "../core/ai-loop.js";
 
 export interface AnnounceCommandOptions {
   description?: string;
@@ -69,7 +70,7 @@ export interface AnnounceCommandOptions {
   aiModel?: string;
 }
 
-type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "preview" | "posting" | "done" | "error";
+type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "preview" | "posting" | "done" | "error";
 
 interface PlatformState {
   key: string;
@@ -94,6 +95,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [context, setContext] = useState<AnnounceContext | null>(null);
   const [aiUsed, setAiUsed] = useState(false);
   const [aiWarning, setAiWarning] = useState<string | null>(null);
+  const [agentLoopResult, setAgentLoopResult] = useState<AgentLoopResult | null>(null);
+  const [agentStatus, setAgentStatus] = useState<string>("");
 
   // Handle keyboard input during preview phase
   useInput(
@@ -178,7 +181,19 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         };
 
         if (options.discover) {
-          setPhase("discover");
+          // If AI is available, use the agentic loop (AI decides what to screenshot)
+          // Otherwise fall back to the mechanical discover flow
+          if (options.ai !== false) {
+            const cfg = loadConfig();
+            const aiOpts = buildAiOptions(cfg.ai, { provider: options.aiProvider, model: options.aiModel });
+            if (aiOpts) {
+              setPhase("agent-loop");
+            } else {
+              setPhase("discover");
+            }
+          } else {
+            setPhase("discover");
+          }
         } else if (options.screenshot || options.screenshotPreset) {
           setPhase("screenshot");
         } else {
@@ -250,6 +265,73 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         setError(`Discovery failed: ${err instanceof Error ? err.message : String(err)}`);
         setErrorSuggestion("Make sure your app is running at the provided URL.\nRun: crosspost screenshot --setup");
         setPhase("error");
+      }
+    })();
+  }, [phase, context]);
+
+  // Phase: Agent Loop (AI-driven discover + screenshot + compose)
+  useEffect(() => {
+    if (phase !== "agent-loop" || !context) return;
+    (async () => {
+      try {
+        const config = loadConfig();
+        const postOptions: PostOptions = { only: options.only, exclude: options.exclude };
+        const adapters = filterAdapters(createAdapters(config, postOptions), postOptions);
+
+        if (adapters.size === 0) {
+          setError("No platforms configured.");
+          setErrorSuggestion("Run: crosspost init");
+          setPhase("error");
+          return;
+        }
+
+        const aiOpts = buildAiOptions(config.ai, { provider: options.aiProvider, model: options.aiModel });
+        if (!aiOpts) {
+          // Shouldn't happen since we checked before entering this phase
+          setPhase("discover");
+          return;
+        }
+
+        const diff = await getDiffForRange({
+          commits: options.commits,
+          since: options.since,
+          tag: options.tag,
+        }).catch(() => null);
+
+        const result = await runAgentLoop({
+          aiOptions: aiOpts,
+          context,
+          appUrl: options.discover!,
+          adapters,
+          verbosity: (options.verbosity as Verbosity) ?? undefined,
+          diff: diff || undefined,
+          screenshotDefaults: {
+            device: options.discoverDevice ?? options.screenshotDevice,
+            darkMode: options.screenshotDark,
+            hide: options.screenshotHide,
+            delay: options.screenshotDelay,
+          },
+          maxScreenshots: options.discoverMaxPages ?? 4,
+          onStatus: (_phase: AgentPhase, detail: string) => {
+            setAgentStatus(detail);
+          },
+        });
+
+        setAgentLoopResult(result);
+        setGeneratedTexts(result.texts);
+        setAiUsed(true);
+
+        // Use the best screenshot as the main image
+        if (result.screenshots.length > 0) {
+          setScreenshotBuffer(result.screenshots[0].buffer);
+        }
+
+        setPhase("preview");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Fall back to mechanical discover on agent loop failure
+        setAiWarning(`AI agent loop failed: ${msg}. Falling back to keyword discovery.`);
+        setPhase("discover");
       }
     })();
   }, [phase, context]);
@@ -530,6 +612,25 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
     );
   }
 
+  if (phase === "agent-loop") {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <StepIndicator current={2} total={4} label="AI agent loop" />
+        <Box marginTop={1}>
+          <Text>
+            <Text color="green"><Spinner type="dots" /></Text>
+            {" "}AI is analyzing, screenshotting, and composing...
+          </Text>
+        </Box>
+        {agentStatus && (
+          <Box marginLeft={3} marginTop={1}>
+            <Text dimColor>{agentStatus}</Text>
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
   if (phase === "ai-generating") {
     return (
       <Box flexDirection="column" paddingX={1}>
@@ -553,7 +654,28 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
       <Box flexDirection="column" paddingX={1}>
         <StepIndicator current={options.discover ? 4 : 3} total={options.discover ? 5 : 4} label="Review content" />
 
-        {discoveryResult && (
+        {agentLoopResult && (
+          <Box marginTop={1} marginBottom={1} flexDirection="column">
+            <Text color="green" bold>
+              ✓ AI captured {agentLoopResult.screenshots.length} screenshot{agentLoopResult.screenshots.length !== 1 ? "s" : ""}
+            </Text>
+            {agentLoopResult.plan.reasoning && (
+              <Box marginLeft={2}>
+                <Text dimColor>{agentLoopResult.plan.reasoning}</Text>
+              </Box>
+            )}
+            {agentLoopResult.screenshots.map((s, i) => (
+              <Box key={i} marginLeft={2}>
+                <Text>
+                  <Text dimColor>•</Text> <Text bold>{s.instruction.description}</Text>
+                  <Text dimColor> ({Math.round(s.buffer.length / 1024)}KB)</Text>
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        )}
+
+        {discoveryResult && !agentLoopResult && (
           <Box marginTop={1} marginBottom={1} flexDirection="column">
             <Text color="green" bold>
               ✓ Discovered {discoveryResult.features.length} feature{discoveryResult.features.length !== 1 ? "s" : ""} across {discoveryResult.pagesVisited.length} page{discoveryResult.pagesVisited.length !== 1 ? "s" : ""}
