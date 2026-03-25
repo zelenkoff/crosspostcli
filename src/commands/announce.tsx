@@ -110,6 +110,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [planFeedback, setPlanFeedback] = useState<string>("");
   // Resolver for the agent loop's onPlanReady callback
   const planResolverRef = React.useRef<((result: { action: "continue" | "revise" | "abort"; feedback?: string }) => void) | null>(null);
+  // Guard: prevent the agent-loop useEffect from re-running while the loop is already in progress
+  const agentLoopRunningRef = React.useRef(false);
 
   // Handle keyboard input during preview phase
   useInput(
@@ -135,15 +137,20 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         if (resolver) {
           planResolverRef.current = null;
           if (planFeedback.trim()) {
-            // User typed feedback — revise
+            // User typed feedback — revise the plan.
+            // The resolver unblocks the still-running agent loop which handles the revision.
+            // We go back to agent-loop UI to show progress, but do NOT re-trigger the effect
+            // (the agent loop is already running and waiting on this resolver).
             resolver({ action: "revise", feedback: planFeedback.trim() });
             setPlanFeedback("");
-            setPhase("agent-loop");
           } else {
-            // Empty input — continue
+            // Empty input — continue with current plan.
+            // The resolver unblocks the agent loop which proceeds to screenshots.
             resolver({ action: "continue" });
-            setPhase("agent-loop");
           }
+          // Return to agent-loop UI to show progress (the effect won't re-trigger
+          // because it's gated by agentLoopRunningRef)
+          setPhase("agent-loop");
         }
       } else if (key.escape) {
         const resolver = planResolverRef.current;
@@ -322,6 +329,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   // Phase: Agent Loop (AI-driven discover + screenshot + compose)
   useEffect(() => {
     if (phase !== "agent-loop" || !context) return;
+    // Guard: don't re-enter if the loop is already running (e.g. returning from plan-review)
+    if (agentLoopRunningRef.current) return;
+    agentLoopRunningRef.current = true;
     (async () => {
       try {
         const config = loadConfig();
@@ -401,6 +411,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         // Fall back to mechanical discover on agent loop failure
         setAiWarning(`AI agent loop failed: ${msg}. Falling back to keyword discovery.`);
         setPhase("discover");
+      } finally {
+        agentLoopRunningRef.current = false;
       }
     })();
   }, [phase, context]);
