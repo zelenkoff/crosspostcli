@@ -327,6 +327,12 @@ function buildComposePrompt(
   platformParts.push(`For Telegram: pick 1 main screenshot that best represents the update.`);
   platformParts.push(`For long-form platforms (Medium, Blog): pick multiple screenshots to place contextually within the article.`);
 
+  platformParts.push(`\n## Inline Image References (Blog/Medium)`);
+  platformParts.push(`For blog and medium posts, embed screenshots INLINE in the markdown text using relative paths.`);
+  platformParts.push(`Use this exact format: ![descriptive alt text](./image-N.png) where N is the 0-based screenshot index.`);
+  platformParts.push(`Place each image right after the paragraph that describes what it shows.`);
+  platformParts.push(`NEVER use placeholder URLs like "image-url", "screenshot-url", or any other fake path. Always use ./image-0.png, ./image-1.png, etc.`);
+
   platformParts.push(`\n## Title Requirement`);
   platformParts.push(`For long-form platforms (blog, medium): include a "title" field with a compelling, context-appropriate article title.`);
   platformParts.push(`The title should reflect the actual content — not be generic. Keep it under 100 characters.`);

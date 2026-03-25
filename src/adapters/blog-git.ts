@@ -59,7 +59,23 @@ export class BlogGitAdapter implements Adapter {
         .filter(Boolean)
         .join("\n");
 
-      const body = content.markdown ?? content.text;
+      let body = content.markdown ?? content.text;
+
+      // Replace any placeholder image URLs the AI may have generated
+      // with actual relative paths to saved images
+      if (content.images && content.images.length > 0) {
+        // Replace generic placeholders like (image-url), (screenshot-url), (placeholder), etc.
+        let imgIndex = 0;
+        body = body.replace(
+          /!\[([^\]]*)\]\((?!\.\/image-\d+\.png)([^)]*(?:image-url|screenshot-url|placeholder|image_url|screenshot_url)[^)]*)\)/g,
+          (_match, alt) => {
+            const idx = imgIndex < content.images!.length ? imgIndex : content.images!.length - 1;
+            imgIndex++;
+            return `![${alt}](./image-${idx}.png)`;
+          },
+        );
+      }
+
       const fileName = `${lang}.${ext}`;
       const filePath = join(postDir, fileName);
       writeFileSync(filePath, frontmatter + body);
