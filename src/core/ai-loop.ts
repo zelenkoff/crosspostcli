@@ -331,7 +331,9 @@ function buildComposePrompt(
   platformParts.push(`For blog and medium posts, embed screenshots INLINE in the markdown text using relative paths.`);
   platformParts.push(`Use this exact format: ![descriptive alt text](./image-N.png) where N is the 0-based screenshot index.`);
   platformParts.push(`Place each image right after the paragraph that describes what it shows.`);
-  platformParts.push(`NEVER use placeholder URLs like "image-url", "screenshot-url", or any other fake path. Always use ./image-0.png, ./image-1.png, etc.`);
+  platformParts.push(`CRITICAL: The ONLY valid image URLs are ./image-0.png, ./image-1.png, ./image-2.png, etc. — one per captured screenshot.`);
+  platformParts.push(`NEVER invent, guess, or fabricate image URLs. Do NOT use https:// links to images. Do NOT make up paths like /images/feature.png.`);
+  platformParts.push(`The screenshots you see attached to this message ARE the images. Reference them by index: ./image-0.png for screenshot 0, ./image-1.png for screenshot 1, etc.`);
 
   platformParts.push(`\n## Title Requirement`);
   platformParts.push(`For long-form platforms (blog, medium): include a "title" field with a compelling, context-appropriate article title.`);

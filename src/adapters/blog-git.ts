@@ -61,13 +61,12 @@ export class BlogGitAdapter implements Adapter {
 
       let body = content.markdown ?? content.text;
 
-      // Replace any placeholder image URLs the AI may have generated
-      // with actual relative paths to saved images
+      // Replace any non-relative image URLs the AI may have generated
+      // with actual relative paths to saved images (./image-0.png, ./image-1.png, etc.)
       if (content.images && content.images.length > 0) {
-        // Replace generic placeholders like (image-url), (screenshot-url), (placeholder), etc.
         let imgIndex = 0;
         body = body.replace(
-          /!\[([^\]]*)\]\((?!\.\/image-\d+\.png)([^)]*(?:image-url|screenshot-url|placeholder|image_url|screenshot_url)[^)]*)\)/g,
+          /!\[([^\]]*)\]\((?!\.\/image-\d+\.png)([^)]+)\)/g,
           (_match, alt) => {
             const idx = imgIndex < content.images!.length ? imgIndex : content.images!.length - 1;
             imgIndex++;
