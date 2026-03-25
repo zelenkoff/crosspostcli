@@ -54,6 +54,8 @@ export interface ScreenshotOptions {
   auth?: AuthOptions;
   /** @deprecated Use auth.storageState instead */
   storageState?: string;
+  /** Run browser in headed mode (visible window) for debugging */
+  headed?: boolean;
 }
 
 export interface ScreenshotResult {
@@ -159,7 +161,7 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
   const scaleFactor = options.scaleFactor ??
     (deviceConfig as { deviceScaleFactor?: number }).deviceScaleFactor ?? 2;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: !options.headed });
 
   try {
     const contextOptions: Record<string, unknown> = {

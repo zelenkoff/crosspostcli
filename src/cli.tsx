@@ -47,6 +47,7 @@ program
   .option("--screenshot-delay <ms>", "Delay before capture in ms", parseInt)
   .option("--screenshot-preset <name>", "Use a saved screenshot preset")
   .option("--screenshot-dark", "Use dark mode for screenshot")
+  .option("--headed", "Run browser in headed mode (visible window) for debugging")
   .action(async (text, opts) => {
     // If no text and no flags, show help
     if (!text && !opts.from && !opts.stdin && !process.stdin.isTTY === false) {
@@ -111,6 +112,7 @@ program
   .option("--list-devices", "List available device presets")
   .option("--setup", "Install Playwright and Chromium")
   .option("--dark-mode", "Use dark color scheme")
+  .option("--headed", "Run browser in headed mode (visible window) for debugging")
   .option("--json", "Output result as JSON")
   .action(async (url, opts) => {
     await runScreenshotCommand(url, {
@@ -176,6 +178,7 @@ program
   .option("--auth-login-url <url>", "Login page URL for form-based app auth")
   .option("--auth-login-fields <fields>", "Login form fields as JSON (e.g., '{\"#email\":\"user@example.com\",\"#password\":\"secret\"}')")
   .option("--auth-login-submit <selector>", "Login submit button selector (default: button[type=submit])")
+  .option("--headed", "Run browser in headed mode (visible window) for debugging")
   .action(async (description, opts) => {
     // Build auth options from CLI flags
     const auth: Record<string, unknown> = {};

@@ -17,6 +17,8 @@ export interface DiscoveryOptions {
   darkMode?: boolean;
   hide?: string[];
   verbose?: boolean;
+  /** Run browser in headed mode (visible window) for debugging */
+  headed?: boolean;
 }
 
 export interface DiscoveredFeature {
@@ -141,7 +143,7 @@ export async function discoverFeatures(options: DiscoveryOptions): Promise<Disco
     contextOptions.colorScheme = "dark";
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: !options.headed });
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
 

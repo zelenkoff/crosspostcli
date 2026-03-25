@@ -27,6 +27,7 @@ interface ScreenshotCommandOptions {
   listDevices?: boolean;
   setup?: boolean;
   darkMode?: boolean;
+  headed?: boolean;
   json?: boolean;
 }
 
@@ -325,6 +326,7 @@ export async function runScreenshotCommand(url?: string, opts?: ScreenshotComman
     fullPage: options.fullPage ?? presetOptions.fullPage,
     output: options.output,
     darkMode: options.darkMode ?? presetOptions.darkMode,
+    headed: options.headed,
   };
 
   // --save-preset: save current options as preset

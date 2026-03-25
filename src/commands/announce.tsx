@@ -71,6 +71,8 @@ export interface AnnounceCommandOptions {
   aiModel?: string;
   /** Auth for protected apps (used by discover/agent-loop) */
   auth?: AuthOptions;
+  /** Run browser in headed mode (visible window) for debugging */
+  headed?: boolean;
 }
 
 type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "preview" | "posting" | "done" | "error";
@@ -224,6 +226,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           device: options.discoverDevice ?? options.screenshotDevice,
           darkMode: options.screenshotDark,
           hide: options.screenshotHide,
+          headed: options.headed,
         });
 
         setDiscoveryResult(result);
@@ -313,6 +316,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             darkMode: options.screenshotDark,
             hide: options.screenshotHide,
             delay: options.screenshotDelay,
+            headed: options.headed,
           },
           maxScreenshots: options.discoverMaxPages ?? 4,
           auth: options.auth,
@@ -357,6 +361,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             device: options.screenshotDevice,
             delay: options.screenshotDelay,
             darkMode: options.screenshotDark,
+            headed: options.headed,
           });
         } else {
           captureOpts = {
@@ -367,6 +372,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             device: options.screenshotDevice,
             delay: options.screenshotDelay,
             darkMode: options.screenshotDark,
+            headed: options.headed,
           };
         }
         const result = await captureScreenshot(captureOpts);
@@ -870,7 +876,7 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
         }
       }
       if (options.screenshot) {
-        const result = await captureScreenshot({ url: options.screenshot });
+        const result = await captureScreenshot({ url: options.screenshot, headed: options.headed });
         images.push(result.buffer);
       }
 
