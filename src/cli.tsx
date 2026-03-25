@@ -168,8 +168,59 @@ program
   .option("--mastodon <text>", "Custom text for Mastodon")
   .option("--discord <text>", "Custom text for Discord")
   .option("--medium <text>", "Custom text for Medium")
+  .option("--auth-storage-state <path>", "Playwright storage state file for app auth (saved browser session)")
+  .option("--auth-user <user>", "HTTP Basic Auth username for protected apps")
+  .option("--auth-pass <pass>", "HTTP Basic Auth password for protected apps")
+  .option("--auth-bearer <token>", "Bearer token for protected apps")
+  .option("--auth-header <header...>", "Custom HTTP headers (key:value format, repeatable)")
+  .option("--auth-login-url <url>", "Login page URL for form-based app auth")
+  .option("--auth-login-fields <fields>", "Login form fields as JSON (e.g., '{\"#email\":\"user@example.com\",\"#password\":\"secret\"}')")
+  .option("--auth-login-submit <selector>", "Login submit button selector (default: button[type=submit])")
   .action(async (description, opts) => {
-    await runAnnounceCommand({ description, ...opts });
+    // Build auth options from CLI flags
+    const auth: Record<string, unknown> = {};
+    let hasAuth = false;
+
+    if (opts.authStorageState) {
+      auth.storageState = opts.authStorageState;
+      hasAuth = true;
+    }
+    if (opts.authUser && opts.authPass) {
+      auth.httpCredentials = { username: opts.authUser, password: opts.authPass };
+      hasAuth = true;
+    }
+    if (opts.authBearer) {
+      auth.headers = { Authorization: `Bearer ${opts.authBearer}` };
+      hasAuth = true;
+    }
+    if (opts.authHeader) {
+      const headers: Record<string, string> = { ...(auth.headers as Record<string, string> ?? {}) };
+      for (const h of opts.authHeader) {
+        const idx = h.indexOf(":");
+        if (idx > 0) headers[h.slice(0, idx).trim()] = h.slice(idx + 1).trim();
+      }
+      auth.headers = headers;
+      hasAuth = true;
+    }
+    if (opts.authLoginUrl && opts.authLoginFields) {
+      try {
+        auth.login = {
+          url: opts.authLoginUrl,
+          fields: JSON.parse(opts.authLoginFields),
+          submit: opts.authLoginSubmit,
+        };
+        hasAuth = true;
+      } catch {
+        console.error('Error: --auth-login-fields must be valid JSON (e.g., \'{"#email":"user@example.com","#password":"secret"}\')');
+        process.exit(1);
+      }
+    }
+
+    await runAnnounceCommand({
+      description,
+      ...opts,
+      auth: hasAuth ? auth : undefined,
+    });
   });
 
 // MCP server (for AI agents)

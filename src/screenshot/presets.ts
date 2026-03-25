@@ -7,6 +7,30 @@ import type { ScreenshotOptions } from "./capture.js";
 const PRESETS_DIR = join(homedir(), ".crosspost");
 const PRESETS_FILE = join(PRESETS_DIR, "screenshots.json");
 
+const AuthSchema = z.object({
+  storageState: z.string().optional(),
+  httpCredentials: z.object({
+    username: z.string(),
+    password: z.string(),
+  }).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  cookies: z.array(z.object({
+    name: z.string(),
+    value: z.string(),
+    domain: z.string(),
+    path: z.string().optional(),
+    httpOnly: z.boolean().optional(),
+    secure: z.boolean().optional(),
+    sameSite: z.enum(["Strict", "Lax", "None"]).optional(),
+  })).optional(),
+  login: z.object({
+    url: z.string(),
+    fields: z.record(z.string(), z.string()),
+    submit: z.string().optional(),
+    waitAfter: z.number().optional(),
+  }).optional(),
+}).optional();
+
 const PresetSchema = z.object({
   url: z.string(),
   selector: z.string().optional(),
@@ -22,6 +46,8 @@ const PresetSchema = z.object({
   quality: z.number().optional(),
   fullPage: z.boolean().optional(),
   darkMode: z.boolean().optional(),
+  auth: AuthSchema,
+  /** @deprecated Use auth.storageState instead */
   storageState: z.string().optional(),
 });
 
@@ -85,6 +111,7 @@ export function presetToOptions(preset: ScreenshotPreset, overrides?: Partial<Sc
     quality: preset.quality,
     fullPage: preset.fullPage,
     darkMode: preset.darkMode,
+    auth: preset.auth ?? (preset.storageState ? { storageState: preset.storageState } : undefined),
     storageState: preset.storageState,
     ...overrides,
   };

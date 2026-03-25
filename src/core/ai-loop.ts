@@ -13,7 +13,7 @@ import type { Adapter } from "../adapters/types.js";
 import type { Changelog } from "./changelog.js";
 import type { AnnounceContext, Tone, Verbosity } from "./announce-templates.js";
 import type { AiGenerateOptions } from "./ai-generator.js";
-import type { ScreenshotOptions, ScreenshotResult } from "../screenshot/capture.js";
+import type { ScreenshotOptions, ScreenshotResult, AuthOptions } from "../screenshot/capture.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -45,6 +45,8 @@ export interface AgentLoopOptions {
   diff?: string;
   /** Base screenshot options (device, dark mode, hide selectors, delay) */
   screenshotDefaults?: Partial<ScreenshotOptions>;
+  /** Authentication options for accessing protected apps */
+  auth?: AuthOptions;
   /** Called with status updates for UI progress */
   onStatus?: (phase: AgentPhase, detail: string) => void;
   /** Max screenshots to capture (default: 4) */
@@ -446,6 +448,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         ...(instruction.url ? { url: instruction.url } : {}),
         ...(instruction.selector ? { selector: instruction.selector } : {}),
         ...(instruction.highlight ? { highlight: instruction.highlight } : {}),
+        // Auth is always passed through from the loop options
+        auth: options.auth,
       };
 
       const result = await captureScreenshot(captureOpts);

@@ -11,6 +11,64 @@ import { getCommitRange, getProjectName, getDiffForRange } from "../core/changel
 import { detectTemplate, type Tone, type Verbosity } from "../core/announce-templates.js";
 import { buildAiOptions } from "../core/ai-generator.js";
 import { runAgentLoop, getScreenshotsForPlatform } from "../core/ai-loop.js";
+import type { AuthOptions } from "../screenshot/capture.js";
+
+// Reusable Zod schema for auth options across MCP tools
+const AuthParamsSchema = {
+  auth_storage_state: z.string().optional().describe("Path to Playwright storage state file (saved browser session with cookies/localStorage)"),
+  auth_username: z.string().optional().describe("HTTP Basic Auth username"),
+  auth_password: z.string().optional().describe("HTTP Basic Auth password"),
+  auth_bearer_token: z.string().optional().describe("Bearer token for Authorization header"),
+  auth_headers: z.record(z.string(), z.string()).optional().describe("Custom HTTP headers (e.g., { 'X-API-Key': '...' })"),
+  auth_cookies: z.array(z.object({
+    name: z.string(),
+    value: z.string(),
+    domain: z.string(),
+    path: z.string().optional(),
+    httpOnly: z.boolean().optional(),
+    secure: z.boolean().optional(),
+  })).optional().describe("Cookies to inject before navigation"),
+  auth_login_url: z.string().optional().describe("Login page URL for form-based auth"),
+  auth_login_fields: z.record(z.string(), z.string()).optional().describe("CSS selector → value pairs to fill on login form (e.g., { '#email': 'user@example.com', '#password': 's3cret' })"),
+  auth_login_submit: z.string().optional().describe("CSS selector for login submit button (default: 'button[type=\"submit\"]')"),
+};
+
+/** Build AuthOptions from flat MCP tool params */
+function buildAuthOptions(params: Record<string, unknown>): AuthOptions | undefined {
+  const auth: AuthOptions = {};
+  let hasAuth = false;
+
+  if (params.auth_storage_state) {
+    auth.storageState = params.auth_storage_state as string;
+    hasAuth = true;
+  }
+  if (params.auth_username && params.auth_password) {
+    auth.httpCredentials = { username: params.auth_username as string, password: params.auth_password as string };
+    hasAuth = true;
+  }
+  if (params.auth_bearer_token) {
+    auth.headers = { ...auth.headers, Authorization: `Bearer ${params.auth_bearer_token as string}` };
+    hasAuth = true;
+  }
+  if (params.auth_headers) {
+    auth.headers = { ...auth.headers, ...(params.auth_headers as Record<string, string>) };
+    hasAuth = true;
+  }
+  if (params.auth_cookies) {
+    auth.cookies = params.auth_cookies as AuthOptions["cookies"];
+    hasAuth = true;
+  }
+  if (params.auth_login_url && params.auth_login_fields) {
+    auth.login = {
+      url: params.auth_login_url as string,
+      fields: params.auth_login_fields as Record<string, string>,
+      submit: params.auth_login_submit as string | undefined,
+    };
+    hasAuth = true;
+  }
+
+  return hasAuth ? auth : undefined;
+}
 
 const VERSION = "0.1.0";
 
@@ -235,6 +293,7 @@ export function createMcpServer() {
       format: z.enum(["png", "jpeg"]).optional().describe("Output format (default: png)"),
       quality: z.number().optional().describe("JPEG quality 1-100"),
       output: z.string().optional().describe("Save path for screenshot file"),
+      ...AuthParamsSchema,
     },
     async (params) => {
       const setup = checkSetup();
@@ -258,6 +317,7 @@ export function createMcpServer() {
         format: params.format,
         quality: params.quality,
         output: params.output,
+        auth: buildAuthOptions(params),
       };
 
       try {
@@ -299,6 +359,7 @@ export function createMcpServer() {
       exclude: z.string().optional().describe("Comma-separated platforms to skip"),
       url: z.string().optional().describe("URL to append to post text"),
       dry_run: z.boolean().optional().describe("Preview without posting"),
+      ...AuthParamsSchema,
     },
     async (params) => {
       // Check Playwright
@@ -326,6 +387,7 @@ export function createMcpServer() {
           hide: params.screenshot_hide,
           device: params.screenshot_device,
           darkMode: params.screenshot_dark_mode,
+          auth: buildAuthOptions(params),
         });
         screenshotBuffer = result.buffer;
       } catch (err) {
@@ -435,6 +497,7 @@ export function createMcpServer() {
       dry_run: z.boolean().optional().describe("Preview without posting"),
       ai_provider: z.string().optional().describe("AI provider override (anthropic or openai)"),
       ai_model: z.string().optional().describe("AI model override"),
+      ...AuthParamsSchema,
     },
     async (params) => {
       // Preflight checks
@@ -547,6 +610,7 @@ export function createMcpServer() {
             delay: params.screenshot_delay,
           },
           maxScreenshots: params.max_screenshots,
+          auth: buildAuthOptions(params),
           onStatus: (_phase, detail) => {
             statusLog.push(detail);
           },

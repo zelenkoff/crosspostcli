@@ -25,6 +25,7 @@ import { readFileSync } from "fs";
 import { getDiffForRange } from "../core/changelog.js";
 import { generateWithAi, buildAiOptions } from "../core/ai-generator.js";
 import { runAgentLoop, getScreenshotsForPlatform, type AgentPhase, type AgentLoopResult } from "../core/ai-loop.js";
+import type { AuthOptions } from "../screenshot/capture.js";
 
 export interface AnnounceCommandOptions {
   description?: string;
@@ -68,6 +69,8 @@ export interface AnnounceCommandOptions {
   ai?: boolean;
   aiProvider?: string;
   aiModel?: string;
+  /** Auth for protected apps (used by discover/agent-loop) */
+  auth?: AuthOptions;
 }
 
 type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "preview" | "posting" | "done" | "error";
@@ -312,6 +315,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             delay: options.screenshotDelay,
           },
           maxScreenshots: options.discoverMaxPages ?? 4,
+          auth: options.auth,
           onStatus: (_phase: AgentPhase, detail: string) => {
             setAgentStatus(detail);
           },

@@ -2,6 +2,40 @@ import { writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 
+export interface AuthOptions {
+  /** Path to Playwright storage state file (cookies + localStorage from a previous session) */
+  storageState?: string;
+  /** HTTP Basic Auth credentials */
+  httpCredentials?: { username: string; password: string };
+  /** Custom HTTP headers applied to every request (e.g., { Authorization: "Bearer ..." }) */
+  headers?: Record<string, string>;
+  /** Cookies to inject before navigation */
+  cookies?: Array<{
+    name: string;
+    value: string;
+    domain: string;
+    path?: string;
+    httpOnly?: boolean;
+    secure?: boolean;
+    sameSite?: "Strict" | "Lax" | "None";
+  }>;
+  /**
+   * Login flow: navigate to this URL and fill a form before taking screenshots.
+   * The browser will navigate here first, fill the fields, click submit, and wait
+   * for navigation to complete before proceeding to the target URL.
+   */
+  login?: {
+    /** URL of the login page */
+    url: string;
+    /** CSS selector → value pairs to fill (e.g., { "#email": "user@example.com", "#password": "s3cret" }) */
+    fields: Record<string, string>;
+    /** CSS selector of the submit button (default: 'button[type="submit"]') */
+    submit?: string;
+    /** Time in ms to wait after login for redirects to settle (default: 3000) */
+    waitAfter?: number;
+  };
+}
+
 export interface ScreenshotOptions {
   url: string;
   selector?: string;
@@ -14,9 +48,12 @@ export interface ScreenshotOptions {
   quality?: number;
   fullPage?: boolean;
   output?: string;
-  storageState?: string;
   darkMode?: boolean;
   scaleFactor?: number;
+  /** Authentication options for accessing protected apps */
+  auth?: AuthOptions;
+  /** @deprecated Use auth.storageState instead */
+  storageState?: string;
 }
 
 export interface ScreenshotResult {
@@ -141,15 +178,51 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
       contextOptions.colorScheme = "dark";
     }
 
-    // Auth state
-    if (options.storageState) {
-      contextOptions.storageState = options.storageState;
+    // Auth: storage state (new location or deprecated field)
+    const auth = options.auth;
+    const storageState = auth?.storageState ?? options.storageState;
+    if (storageState) {
+      contextOptions.storageState = storageState;
+    }
+
+    // Auth: HTTP Basic credentials
+    if (auth?.httpCredentials) {
+      contextOptions.httpCredentials = auth.httpCredentials;
+    }
+
+    // Auth: custom headers (Bearer tokens, API keys, etc.)
+    if (auth?.headers && Object.keys(auth.headers).length > 0) {
+      contextOptions.extraHTTPHeaders = auth.headers;
     }
 
     const context = await browser.newContext(contextOptions);
+
+    // Auth: inject cookies
+    if (auth?.cookies && auth.cookies.length > 0) {
+      await context.addCookies(auth.cookies);
+    }
+
     const page = await context.newPage();
 
-    // Navigate
+    // Auth: login flow — fill form and submit before navigating to target
+    if (auth?.login) {
+      await page.goto(auth.login.url, { waitUntil: "networkidle", timeout: 30_000 });
+      await page.waitForTimeout(1000);
+
+      for (const [selector, value] of Object.entries(auth.login.fields)) {
+        await page.fill(selector, value);
+      }
+
+      const submitSelector = auth.login.submit ?? 'button[type="submit"]';
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "networkidle", timeout: 15_000 }).catch(() => {}),
+        page.click(submitSelector),
+      ]);
+
+      await page.waitForTimeout(auth.login.waitAfter ?? 3000);
+    }
+
+    // Navigate to target
     await page.goto(options.url, { waitUntil: "networkidle", timeout: 30_000 });
 
     // Wait for additional delay
