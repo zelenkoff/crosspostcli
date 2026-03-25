@@ -47,8 +47,9 @@ describe("PLATFORM_FORMATTING_RULES", () => {
     expect(PLATFORM_FORMATTING_RULES.discord).toBeDefined();
   });
 
-  test("telegram rules mention one screenshot", () => {
+  test("telegram rules mention one screenshot and real link", () => {
     expect(PLATFORM_FORMATTING_RULES.telegram).toContain("ONE");
+    expect(PLATFORM_FORMATTING_RULES.telegram).toContain("clickable link");
   });
 
   test("medium rules mention multiple screenshots", () => {
@@ -108,20 +109,25 @@ describe("buildPlatformInstructions", () => {
 });
 
 describe("default system prompts", () => {
-  test("plan prompt mentions developer advocate", () => {
-    expect(DEFAULT_PLAN_SYSTEM_PROMPT).toContain("developer advocate");
+  test("plan prompt focuses on user perspective", () => {
+    expect(DEFAULT_PLAN_SYSTEM_PROMPT).toContain("user");
   });
 
-  test("compose prompt mentions screenshots", () => {
+  test("compose prompt mentions screenshots and no jargon", () => {
     expect(DEFAULT_COMPOSE_SYSTEM_PROMPT).toContain("screenshots");
+    expect(DEFAULT_COMPOSE_SYSTEM_PROMPT).toContain("No jargon");
   });
 
-  test("analysis prompt mentions content strategy", () => {
-    expect(DEFAULT_ANALYSIS_SYSTEM_PROMPT).toContain("content strategist");
+  test("compose prompt discourages generic CTAs", () => {
+    expect(DEFAULT_COMPOSE_SYSTEM_PROMPT).toContain("Never use generic marketing CTAs");
   });
 
-  test("simple prompt mentions formatting conventions", () => {
-    expect(DEFAULT_SIMPLE_SYSTEM_PROMPT).toContain("formatting conventions");
+  test("analysis prompt focuses on end users", () => {
+    expect(DEFAULT_ANALYSIS_SYSTEM_PROMPT).toContain("end users");
+  });
+
+  test("simple prompt emphasizes human readability", () => {
+    expect(DEFAULT_SIMPLE_SYSTEM_PROMPT).toContain("normal humans");
   });
 
   test("all prompts end with JSON instruction", () => {
