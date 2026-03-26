@@ -1,13 +1,13 @@
 import React, { useState } from "react";
-import { SplitPane } from "../components/SplitPane.js";
-import { ComposeForm } from "../components/ComposeForm.js";
-import { ProgressLog } from "../components/ProgressLog.js";
-import { ContentPlanCard } from "../components/ContentPlanCard.js";
-import { PlatformTextEditor } from "../components/PlatformTextEditor.js";
-import { ScreenshotGallery } from "../components/ScreenshotGallery.js";
-import { PostResults } from "../components/PostResults.js";
-import { useAnnounce } from "../hooks/useAnnounce.js";
-import { useSSE } from "../hooks/useSSE.js";
+import { SplitPane } from "../components/SplitPane";
+import { ComposeForm } from "../components/ComposeForm";
+import { ProgressLog } from "../components/ProgressLog";
+import { ContentPlanCard } from "../components/ContentPlanCard";
+import { PlatformTextEditor } from "../components/PlatformTextEditor";
+import { ScreenshotGallery } from "../components/ScreenshotGallery";
+import { PostResults } from "../components/PostResults";
+import { useAnnounce } from "../hooks/useAnnounce";
+import { useSSE } from "../hooks/useSSE";
 
 export function AnnouncePage() {
   const { state, generate, onSSEEvent, continuePlan, abortPlan, updateText, revise, post, reset } = useAnnounce();

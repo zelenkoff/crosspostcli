@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { SSEEvent } from "../../shared/api-types.js";
+import type { SSEEvent } from "../../shared/api-types";
 
 export function useSSE(
   url: string | null,

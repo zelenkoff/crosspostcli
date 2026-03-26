@@ -1,6 +1,6 @@
 import { useReducer, useCallback } from "react";
-import type { SSEEvent, ContentPlanDTO, AnnounceStartRequest, PostResultDTO } from "../../shared/api-types.js";
-import { startAnnounce, sendPlanAction, sendRevise, postContent } from "../api/client.js";
+import type { SSEEvent, ContentPlanDTO, AnnounceStartRequest, PostResultDTO } from "../../shared/api-types";
+import { startAnnounce, sendPlanAction, sendRevise, postContent } from "../api/client";
 
 export type AnnounceStage =
   | "idle"

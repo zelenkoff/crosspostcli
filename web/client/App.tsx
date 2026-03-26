@@ -1,7 +1,7 @@
 import React from "react";
 import { Route, Switch, Link, useLocation } from "wouter";
-import { StatusPage } from "./pages/StatusPage.js";
-import { AnnouncePage } from "./pages/AnnouncePage.js";
+import { StatusPage } from "./pages/StatusPage";
+import { AnnouncePage } from "./pages/AnnouncePage";
 import "./styles/global.css";
 
 export default function App() {

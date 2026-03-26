@@ -1,5 +1,5 @@
 import React from "react";
-import { screenshotUrl } from "../api/client.js";
+import { screenshotUrl } from "../api/client";
 
 interface ScreenshotGalleryProps {
   sessionId: string;

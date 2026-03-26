@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { SplitPane } from "../components/SplitPane.js";
-import { PlatformStatusList } from "../components/PlatformStatusList.js";
-import { fetchStatus } from "../api/client.js";
-import type { PlatformStatusDTO } from "../../shared/api-types.js";
+import { SplitPane } from "../components/SplitPane";
+import { PlatformStatusList } from "../components/PlatformStatusList";
+import { fetchStatus } from "../api/client";
+import type { PlatformStatusDTO } from "../../shared/api-types";
 
 export function StatusPage() {
   const [platforms, setPlatforms] = useState<PlatformStatusDTO[]>([]);

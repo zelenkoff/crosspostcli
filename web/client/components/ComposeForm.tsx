@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import type { AnnounceStartRequest } from "../../shared/api-types.js";
+import type { AnnounceStartRequest } from "../../shared/api-types";
 
 interface ComposeFormProps {
   onSubmit: (req: AnnounceStartRequest) => void;

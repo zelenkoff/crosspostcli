@@ -1,5 +1,5 @@
 import React from "react";
-import type { PostResultDTO } from "../../shared/api-types.js";
+import type { PostResultDTO } from "../../shared/api-types";
 
 interface PostResultsProps {
   results: PostResultDTO[];

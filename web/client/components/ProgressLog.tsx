@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import type { LogLine } from "../hooks/useAnnounce.js";
+import type { LogLine } from "../hooks/useAnnounce";
 
 interface ProgressLogProps {
   logs: LogLine[];

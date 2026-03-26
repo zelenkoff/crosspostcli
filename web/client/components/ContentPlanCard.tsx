@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import type { ContentPlanDTO } from "../../shared/api-types.js";
+import type { ContentPlanDTO } from "../../shared/api-types";
 
 interface ContentPlanCardProps {
   plan: ContentPlanDTO;

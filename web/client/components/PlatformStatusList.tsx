@@ -1,5 +1,5 @@
 import React from "react";
-import type { PlatformStatusDTO } from "../../shared/api-types.js";
+import type { PlatformStatusDTO } from "../../shared/api-types";
 
 interface PlatformStatusListProps {
   platforms: PlatformStatusDTO[];

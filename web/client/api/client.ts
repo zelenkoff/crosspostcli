@@ -6,7 +6,7 @@ import type {
   ReviseRequest,
   PostRequest,
   PostResponse,
-} from "../../shared/api-types.js";
+} from "../../shared/api-types";
 
 export async function fetchStatus(): Promise<StatusResponse> {
   const res = await fetch("/api/status");
