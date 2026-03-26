@@ -203,6 +203,7 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
         verbosity: body.verbosity as Verbosity | undefined,
         diff: diff || undefined,
         language: body.lang,
+        auth: body.auth,
         onStatus: (phase, detail) => {
           emitPhase(phase, detail);
         },

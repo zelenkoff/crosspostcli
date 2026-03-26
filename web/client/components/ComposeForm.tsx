@@ -18,14 +18,33 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
   const [lang, setLang] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Auth fields
+  const [authType, setAuthType] = useState<"none" | "basic" | "token" | "cookie">("none");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authToken, setAuthToken] = useState("");
+  const [authCookie, setAuthCookie] = useState("");
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!description && !fromGit) return;
+
+    let auth: AnnounceStartRequest["auth"] = undefined;
+    if (appUrl && authType !== "none") {
+      if (authType === "basic" && (authUsername || authPassword)) {
+        auth = { username: authUsername || undefined, password: authPassword || undefined };
+      } else if (authType === "token" && authToken) {
+        auth = { token: authToken };
+      } else if (authType === "cookie" && authCookie) {
+        auth = { cookies: authCookie };
+      }
+    }
 
     onSubmit({
       description: description || undefined,
       fromGit: fromGit || undefined,
       appUrl: appUrl || undefined,
+      auth,
       tone,
       verbosity,
       lang: lang || undefined,
@@ -57,6 +76,69 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
           disabled={disabled}
         />
       </div>
+
+      {appUrl && (
+        <div className="form-group">
+          <label className="form-label">Auth</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+            {(["none", "basic", "token", "cookie"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`platform-chip${authType === t ? " platform-chip--active" : ""}`}
+                onClick={() => setAuthType(t)}
+                disabled={disabled}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {authType === "basic" && (
+            <div className="form-row">
+              <input
+                className="form-input"
+                placeholder="username"
+                value={authUsername}
+                onChange={(e) => setAuthUsername(e.target.value)}
+                disabled={disabled}
+                autoComplete="off"
+              />
+              <input
+                className="form-input"
+                type="password"
+                placeholder="password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                disabled={disabled}
+                autoComplete="new-password"
+              />
+            </div>
+          )}
+
+          {authType === "token" && (
+            <input
+              className="form-input"
+              placeholder="Bearer token"
+              value={authToken}
+              onChange={(e) => setAuthToken(e.target.value)}
+              disabled={disabled}
+              autoComplete="off"
+            />
+          )}
+
+          {authType === "cookie" && (
+            <input
+              className="form-input"
+              placeholder='e.g. session=abc123; token=xyz'
+              value={authCookie}
+              onChange={(e) => setAuthCookie(e.target.value)}
+              disabled={disabled}
+              autoComplete="off"
+            />
+          )}
+        </div>
+      )}
 
       <div className="form-row">
         <div className="form-group">
@@ -115,19 +197,15 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
 
           <div className="form-group">
             <label className="form-label">Source</label>
-            <label className="platform-chip" style={{ cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={fromGit}
-                onChange={(e) => setFromGit(e.target.checked)}
-                style={{ display: "none" }}
-                disabled={disabled}
-              />
-              <span className={`platform-chip${fromGit ? " platform-chip--active" : ""}`}>
-                <span className="platform-chip__dot" />
-                from git
-              </span>
-            </label>
+            <button
+              type="button"
+              className={`platform-chip${fromGit ? " platform-chip--active" : ""}`}
+              onClick={() => setFromGit((v) => !v)}
+              disabled={disabled}
+            >
+              <span className="platform-chip__dot" />
+              from git
+            </button>
           </div>
         </>
       )}

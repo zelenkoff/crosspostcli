@@ -11,6 +11,17 @@ export interface StatusResponse {
   platforms: PlatformStatusDTO[];
 }
 
+export interface AuthOptions {
+  /** Username for HTTP Basic auth */
+  username?: string;
+  /** Password for HTTP Basic auth */
+  password?: string;
+  /** Bearer token */
+  token?: string;
+  /** Cookie string (e.g. "session=abc123") */
+  cookies?: string;
+}
+
 export interface AnnounceStartRequest {
   description?: string;
   fromGit?: boolean;
@@ -18,6 +29,7 @@ export interface AnnounceStartRequest {
   since?: string;
   tag?: string;
   appUrl?: string;
+  auth?: AuthOptions;
   only?: string[];
   exclude?: string[];
   dryRun?: boolean;
