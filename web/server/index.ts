@@ -3,6 +3,7 @@ import {
   handleAnnounceStart,
   handleAnnounceStream,
   handlePlanAction,
+  handleScreenshotPlanAction,
   handleRevise,
 } from "./routes/announce.js";
 import { handleScreenshot } from "./routes/screenshots.js";
@@ -12,6 +13,7 @@ const PORT = 3420;
 
 Bun.serve({
   port: PORT,
+  idleTimeout: 0, // disable timeout — SSE streams stay open for minutes
   async fetch(req) {
     const url = new URL(req.url);
     const { pathname } = url;
@@ -47,6 +49,8 @@ Bun.serve({
         const parts = pathname.split("/");
         if (parts.length === 5 && parts[4] === "plan-action") {
           response = await handlePlanAction(parts[3], req);
+        } else if (parts.length === 5 && parts[4] === "screenshot-plan-action") {
+          response = await handleScreenshotPlanAction(parts[3], req);
         } else if (parts.length === 5 && parts[4] === "revise") {
           response = await handleRevise(parts[3], req);
         } else {

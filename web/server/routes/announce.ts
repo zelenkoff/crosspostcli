@@ -8,7 +8,7 @@ import { detectTemplate } from "../../../src/core/announce-templates.js";
 import type { AnnounceContext, Tone, Verbosity } from "../../../src/core/announce-templates.js";
 import type { PostOptions } from "../../../src/core/engine.js";
 import { createSession, getSession } from "../session-store.js";
-import type { SSEEvent, AnnounceStartRequest, PlanActionRequest, ReviseRequest } from "../../shared/api-types.js";
+import type { SSEEvent, AnnounceStartRequest, PlanActionRequest, ReviseRequest, ScreenshotPlanActionRequest } from "../../shared/api-types.js";
 
 // ── POST /api/announce/start ──────────────────────────────────────────────────
 
@@ -97,6 +97,24 @@ export async function handlePlanAction(sessionId: string, req: Request): Promise
   if (session.planResolverFn) {
     session.planResolverFn({ action: body.action, feedback: body.feedback });
     session.planResolverFn = undefined;
+  }
+  return Response.json({ ok: true });
+}
+
+// ── POST /api/announce/:sessionId/screenshot-plan-action ──────────────────────
+
+export async function handleScreenshotPlanAction(sessionId: string, req: Request): Promise<Response> {
+  const session = getSession(sessionId);
+  if (!session) return Response.json({ error: "Session not found" }, { status: 404 });
+
+  const body = (await req.json()) as ScreenshotPlanActionRequest;
+  if (session.screenshotPlanResolverFn) {
+    session.screenshotPlanResolverFn(
+      body.screenshots
+        ? { screenshots: body.screenshots, reasoning: "User-confirmed plan" }
+        : null
+    );
+    session.screenshotPlanResolverFn = undefined;
   }
   return Response.json({ ok: true });
 }
@@ -218,7 +236,7 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
         verbosity: body.verbosity as Verbosity | undefined,
         diff: diff || undefined,
         language: body.lang,
-        auth: body.auth,
+        auth: body.auth ? buildAuthOptions(body.auth) : undefined,
         onStatus: (phase, detail) => {
           emitPhase(phase, detail);
         },
@@ -239,6 +257,21 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
           // Wait for user to respond via /plan-action
           return new Promise((resolve) => {
             session.planResolverFn = resolve;
+          });
+        },
+        onScreenshotPlanReady: async (screenshotPlan) => {
+          // Push the plan to the client for review
+          session.queue.push({
+            type: "screenshot_plan",
+            screenshotPlan: {
+              reasoning: screenshotPlan.reasoning,
+              screenshots: screenshotPlan.screenshots,
+            },
+          });
+
+          // Wait for user to confirm/edit via /screenshot-plan-action
+          return new Promise((resolve) => {
+            session.screenshotPlanResolverFn = resolve;
           });
         },
       });
@@ -292,6 +325,33 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
     session.queue.push({ type: "error", message: msg });
     session.queue.close();
   }
+}
+
+import type { AuthOptions as CaptureAuthOptions } from "../../../src/screenshot/capture.js";
+import type { AuthOptions as ApiAuthOptions } from "../../shared/api-types.js";
+
+function buildAuthOptions(auth: ApiAuthOptions): CaptureAuthOptions {
+  const result: CaptureAuthOptions = {};
+  if (auth.username && auth.password) {
+    result.httpCredentials = { username: auth.username, password: auth.password };
+  }
+  if (auth.token) {
+    result.headers = { Authorization: `Bearer ${auth.token}` };
+  }
+  if (auth.cookies) {
+    // Will be handled via login flow cookies below
+  }
+  if (auth.loginUrl && auth.username && auth.password) {
+    result.login = {
+      url: auth.loginUrl,
+      fields: {
+        [auth.loginUsernameSelector ?? "input[type='email'], input[name='email'], input[name='username']"]: auth.username,
+        [auth.loginPasswordSelector ?? "input[type='password']"]: auth.password,
+      },
+      submit: auth.loginSubmitSelector,
+    };
+  }
+  return result;
 }
 
 // Minimal context builder for revise calls where we don't have full options

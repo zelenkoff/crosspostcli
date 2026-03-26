@@ -81,6 +81,12 @@ export interface AgentLoopOptions {
    * Return { action: "abort" } to stop the agent loop.
    */
   onPlanReady?: (plan: ContentPlan) => Promise<{ action: "continue" | "revise" | "abort"; feedback?: string }>;
+  /**
+   * Called when the screenshot plan is ready for user review.
+   * Return the (possibly edited) list of screenshot instructions to proceed,
+   * or null/undefined to abort.
+   */
+  onScreenshotPlanReady?: (plan: ScreenshotPlan) => Promise<ScreenshotPlan | null>;
 }
 
 export type AgentPhase = "analyzing" | "planning" | "screenshotting" | "composing" | "done";
@@ -220,21 +226,22 @@ function buildPlanPrompt(
   }
 
   parts.push(`\n## Instructions`);
-  parts.push(`Based on the analysis above, decide which pages/sections of the app at ${appUrl} would make the best screenshots.`);
-  parts.push(`Think about:`);
-  parts.push(`- What UI changes are most visually interesting?`);
-  parts.push(`- What would make a developer stop scrolling?`);
-  parts.push(`- Which pages show the new features best?`);
-  parts.push(`- Should we capture the full page or a specific element?`);
-  parts.push(`\nReturn 1-4 screenshot instructions. Each should have:`);
-  parts.push(`- "url": The full URL to navigate to (can be the same base URL or subpages)`);
-  parts.push(`- "selector": Optional CSS selector to capture a specific element (omit for full viewport)`);
-  parts.push(`- "highlight": Optional array of CSS selectors to highlight with a red outline`);
+  parts.push(`Based on the code diff and changes above, decide which pages/sections of the app at ${appUrl} would make the best screenshots.`);
+  parts.push(`\nIMPORTANT — derive URLs and selectors from the actual code:`);
+  parts.push(`- Look at the diff for route definitions, page components, or URL paths (e.g. "/settings", "/dashboard")`);
+  parts.push(`- Look at the diff for CSS class names, component names, or DOM element IDs that were added or changed`);
+  parts.push(`- Only use selectors that you can see EXIST in the diff (added/modified code)`);
+  parts.push(`- If you cannot find a specific selector in the diff, omit "selector" and capture the full page`);
+  parts.push(`- Prefer full-page screenshots over element selectors when uncertain`);
+  parts.push(`\nReturn 1-3 screenshot instructions. Each should have:`);
+  parts.push(`- "url": The full URL to navigate to — derive from actual routes in the diff, not guesses`);
+  parts.push(`- "selector": ONLY if you found this CSS selector in the diff. Omit entirely if not found in code.`);
+  parts.push(`- "highlight": Optional array of CSS selectors to highlight with a red outline (only if found in diff)`);
   parts.push(`- "description": What this screenshot shows and why it matters`);
 
   parts.push(`\n## Output Format`);
   parts.push(`Return ONLY valid JSON, no markdown fences:`);
-  parts.push(`{"reasoning": "why these screenshots", "screenshots": [{"url": "...", "selector": "...", "highlight": ["..."], "description": "..."}]}`);
+  parts.push(`{"reasoning": "why these screenshots and which part of the diff informed each URL/selector", "screenshots": [{"url": "...", "selector": "...", "highlight": ["..."], "description": "..."}]}`);
 
   return { system, user: parts.join("\n") };
 }
@@ -616,11 +623,22 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
   emit("planning", `AI planned ${plan.screenshots.length} screenshot(s): ${plan.reasoning.slice(0, 100)}`);
 
+  // Allow caller to review and edit the screenshot plan before execution
+  let finalPlan = plan;
+  if (options.onScreenshotPlanReady) {
+    const reviewed = await options.onScreenshotPlanReady(plan);
+    if (!reviewed) {
+      throw new Error("Screenshot plan rejected by user.");
+    }
+    finalPlan = reviewed;
+    emit("planning", `Screenshot plan confirmed: ${finalPlan.screenshots.length} screenshot(s)`);
+  }
+
   // ── Execute: Capture screenshots ───────────────────────────────────
   // Uses a single BrowserSession so headed mode shows one persistent window
   // that navigates between pages (instead of opening/closing per screenshot).
 
-  emit("screenshotting", `Capturing ${plan.screenshots.length} screenshot(s)...`);
+  emit("screenshotting", `Capturing ${finalPlan.screenshots.length} screenshot(s)...`);
 
   const { BrowserSession } = await import("../screenshot/capture.js");
   const captured: CapturedScreenshot[] = [];
@@ -633,9 +651,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   try {
     await session.init();
 
-    for (let i = 0; i < plan.screenshots.length; i++) {
-      const instruction = plan.screenshots[i];
-      emit("screenshotting", `[${i + 1}/${plan.screenshots.length}] ${instruction.description}`);
+    for (let i = 0; i < finalPlan.screenshots.length; i++) {
+      const instruction = finalPlan.screenshots[i];
+      emit("screenshotting", `[${i + 1}/${finalPlan.screenshots.length}] ${instruction.description}`);
 
       try {
         // Per-screenshot timeout (45s) so one stuck page doesn't block the whole loop
@@ -723,7 +741,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     titles: composed.titles,
     screenshots: captured,
     selectedScreenshots: composed.selectedScreenshots,
-    plan,
+    plan: finalPlan,
     contentPlan: contentPlan ?? undefined,
   };
 }

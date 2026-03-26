@@ -11,7 +11,7 @@ export default function App() {
     <div className="app">
       <nav className="nav">
         <Link href="/" className="nav__logo">
-          <div className="nav__logo-icon">cp</div>
+          <div className="nav__logo-icon">✕</div>
           CrossPost
         </Link>
 

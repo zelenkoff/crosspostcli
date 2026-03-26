@@ -1,12 +1,13 @@
 import { useReducer, useCallback } from "react";
-import type { SSEEvent, ContentPlanDTO, AnnounceStartRequest, PostResultDTO } from "../../shared/api-types";
-import { startAnnounce, sendPlanAction, sendRevise, postContent } from "../api/client";
+import type { SSEEvent, ContentPlanDTO, ScreenshotPlanDTO, ScreenshotInstructionDTO, AnnounceStartRequest, PostResultDTO } from "../../shared/api-types";
+import { startAnnounce, sendPlanAction, sendScreenshotPlanAction, sendRevise, postContent } from "../api/client";
 
 export type AnnounceStage =
   | "idle"
   | "starting"
   | "running"
   | "plan-review"
+  | "screenshot-plan-review"
   | "preview"
   | "posting"
   | "done"
@@ -24,6 +25,7 @@ export interface AnnounceState {
   streamUrl: string | null;
   logs: LogLine[];
   contentPlan: ContentPlanDTO | null;
+  screenshotPlan: ScreenshotPlanDTO | null;
   texts: Record<string, string>;
   screenshotIndices: number[];
   postResults: PostResultDTO[];
@@ -33,6 +35,8 @@ export interface AnnounceState {
 type Action =
   | { type: "start" }
   | { type: "started"; sessionId: string }
+  | { type: "plan_accepted" }
+  | { type: "screenshot_plan_accepted" }
   | { type: "sse"; event: SSEEvent }
   | { type: "update_text"; key: string; value: string }
   | { type: "post_start" }
@@ -46,6 +50,7 @@ const initial: AnnounceState = {
   streamUrl: null,
   logs: [],
   contentPlan: null,
+  screenshotPlan: null,
   texts: {},
   screenshotIndices: [],
   postResults: [],
@@ -65,6 +70,12 @@ function reducer(state: AnnounceState, action: Action): AnnounceState {
         streamUrl: `/api/announce/${action.sessionId}/stream`,
       };
 
+    case "plan_accepted":
+      return { ...state, stage: "running" };
+
+    case "screenshot_plan_accepted":
+      return { ...state, stage: "running", screenshotPlan: null };
+
     case "sse": {
       const e = action.event;
       if (e.type === "phase") {
@@ -75,6 +86,9 @@ function reducer(state: AnnounceState, action: Action): AnnounceState {
       }
       if (e.type === "plan") {
         return { ...state, stage: "plan-review", contentPlan: e.contentPlan };
+      }
+      if (e.type === "screenshot_plan") {
+        return { ...state, stage: "screenshot-plan-review", screenshotPlan: e.screenshotPlan };
       }
       if (e.type === "texts") {
         return { ...state, stage: "preview", texts: e.texts };
@@ -129,10 +143,19 @@ export function useAnnounce() {
     dispatch({ type: "sse", event });
   }, []);
 
+  const confirmScreenshotPlan = useCallback(async (screenshots: ScreenshotInstructionDTO[]) => {
+    if (!state.sessionId) return;
+    await sendScreenshotPlanAction(state.sessionId, { screenshots });
+    dispatch({ type: "screenshot_plan_accepted" });
+    dispatch({ type: "sse", event: { type: "phase", phase: "screenshotting", detail: "Starting screenshot capture..." } });
+  }, [state.sessionId]);
+
   const continuePlan = useCallback(async (feedback?: string) => {
     if (!state.sessionId) return;
     const action = feedback?.trim() ? "revise" : "continue";
     await sendPlanAction(state.sessionId, { action, feedback });
+    // Transition back to running so the UI shows spinner while agent generates content
+    dispatch({ type: "plan_accepted" });
     dispatch({ type: "sse", event: { type: "phase", phase: "planning", detail: action === "revise" ? "Revising plan..." : "Continuing..." } });
   }, [state.sessionId]);
 
@@ -177,6 +200,7 @@ export function useAnnounce() {
     onSSEEvent,
     continuePlan,
     abortPlan,
+    confirmScreenshotPlan,
     updateText,
     revise,
     post,

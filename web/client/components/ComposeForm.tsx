@@ -24,6 +24,7 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
   const [authPassword, setAuthPassword] = useState("");
   const [authToken, setAuthToken] = useState("");
   const [authCookie, setAuthCookie] = useState("");
+  const [authLoginUrl, setAuthLoginUrl] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,7 +33,7 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
     let auth: AnnounceStartRequest["auth"] = undefined;
     if (appUrl && authType !== "none") {
       if (authType === "basic" && (authUsername || authPassword)) {
-        auth = { username: authUsername || undefined, password: authPassword || undefined };
+        auth = { username: authUsername || undefined, password: authPassword || undefined, loginUrl: authLoginUrl || undefined };
       } else if (authType === "token" && authToken) {
         auth = { token: authToken };
       } else if (authType === "cookie" && authCookie) {
@@ -95,25 +96,35 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
           </div>
 
           {authType === "basic" && (
-            <div className="form-row">
+            <>
+              <div className="form-row">
+                <input
+                  className="form-input"
+                  placeholder="username / email"
+                  value={authUsername}
+                  onChange={(e) => setAuthUsername(e.target.value)}
+                  disabled={disabled}
+                  autoComplete="off"
+                />
+                <input
+                  className="form-input"
+                  type="password"
+                  placeholder="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  disabled={disabled}
+                  autoComplete="new-password"
+                />
+              </div>
               <input
                 className="form-input"
-                placeholder="username"
-                value={authUsername}
-                onChange={(e) => setAuthUsername(e.target.value)}
+                style={{ marginTop: 6 }}
+                placeholder="Login page URL (e.g. http://localhost:3001/login)"
+                value={authLoginUrl}
+                onChange={(e) => setAuthLoginUrl(e.target.value)}
                 disabled={disabled}
-                autoComplete="off"
               />
-              <input
-                className="form-input"
-                type="password"
-                placeholder="password"
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                disabled={disabled}
-                autoComplete="new-password"
-              />
-            </div>
+            </>
           )}
 
           {authType === "token" && (

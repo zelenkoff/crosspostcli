@@ -1,6 +1,5 @@
 import type { SSEEvent } from "../shared/api-types.js";
-import type { AgentLoopResult } from "../../src/core/ai-loop.js";
-import type { ContentPlan } from "../../src/core/ai-loop.js";
+import type { AgentLoopResult, ContentPlan, ScreenshotPlan, ScreenshotInstruction } from "../../src/core/ai-loop.js";
 
 // ── AsyncQueue ────────────────────────────────────────────────────────────────
 
@@ -48,6 +47,8 @@ export interface Session {
   contentPlan?: ContentPlan;
   /** Unblocks the paused onPlanReady inside runAgentLoop */
   planResolverFn?: (r: { action: "continue" | "revise" | "abort"; feedback?: string }) => void;
+  /** Unblocks the paused onScreenshotPlanReady inside runAgentLoop */
+  screenshotPlanResolverFn?: (plan: ScreenshotPlan | null) => void;
   aborted: boolean;
 }
 

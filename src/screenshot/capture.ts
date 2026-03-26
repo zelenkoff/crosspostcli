@@ -289,9 +289,11 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
     if (options.selector) {
       const element = await page.$(options.selector);
       if (!element) {
-        throw new Error(`Element not found: "${options.selector}"`);
+        // Selector not found — fall back to full-page screenshot instead of failing
+        screenshotBuffer = await page.screenshot({ ...screenshotOptions, fullPage: true }) as Buffer;
+      } else {
+        screenshotBuffer = await element.screenshot(screenshotOptions) as Buffer;
       }
-      screenshotBuffer = await element.screenshot(screenshotOptions) as Buffer;
     } else {
       screenshotBuffer = await page.screenshot(screenshotOptions) as Buffer;
     }
@@ -510,8 +512,12 @@ export class BrowserSession {
     let screenshotBuffer: Buffer;
     if (opts.selector) {
       const element = await this.page.$(opts.selector);
-      if (!element) throw new Error(`Element not found: "${opts.selector}"`);
-      screenshotBuffer = await element.screenshot(screenshotOptions) as Buffer;
+      if (!element) {
+        // Selector not found — fall back to full-page screenshot instead of failing
+        screenshotBuffer = await this.page.screenshot({ ...screenshotOptions, fullPage: true }) as Buffer;
+      } else {
+        screenshotBuffer = await element.screenshot(screenshotOptions) as Buffer;
+      }
     } else {
       screenshotBuffer = await this.page.screenshot(screenshotOptions) as Buffer;
     }

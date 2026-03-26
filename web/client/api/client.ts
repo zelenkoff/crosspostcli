@@ -3,6 +3,7 @@ import type {
   AnnounceStartRequest,
   AnnounceStartResponse,
   PlanActionRequest,
+  ScreenshotPlanActionRequest,
   ReviseRequest,
   PostRequest,
   PostResponse,
@@ -30,6 +31,14 @@ export function openAnnounceSteam(sessionId: string): EventSource {
 
 export async function sendPlanAction(sessionId: string, body: PlanActionRequest): Promise<void> {
   await fetch(`/api/announce/${sessionId}/plan-action`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function sendScreenshotPlanAction(sessionId: string, body: ScreenshotPlanActionRequest): Promise<void> {
+  await fetch(`/api/announce/${sessionId}/screenshot-plan-action`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

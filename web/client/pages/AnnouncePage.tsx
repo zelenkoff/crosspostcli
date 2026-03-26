@@ -3,16 +3,21 @@ import { SplitPane } from "../components/SplitPane";
 import { ComposeForm } from "../components/ComposeForm";
 import { ProgressLog } from "../components/ProgressLog";
 import { ContentPlanCard } from "../components/ContentPlanCard";
+import { ScreenshotPlanCard } from "../components/ScreenshotPlanCard";
 import { PlatformTextEditor } from "../components/PlatformTextEditor";
+import { ContentPreview } from "../components/ContentPreview";
 import { ScreenshotGallery } from "../components/ScreenshotGallery";
 import { PostResults } from "../components/PostResults";
 import { useAnnounce } from "../hooks/useAnnounce";
 import { useSSE } from "../hooks/useSSE";
 
 export function AnnouncePage() {
-  const { state, generate, onSSEEvent, continuePlan, abortPlan, updateText, revise, post, reset } = useAnnounce();
+  const { state, generate, onSSEEvent, continuePlan, abortPlan, confirmScreenshotPlan, updateText, revise, post, reset } = useAnnounce();
   const [reviseInput, setReviseInput] = useState("");
   const [dryRunResults, setDryRunResults] = useState<boolean>(false);
+  const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null);
+
+  const togglePreview = (key: string) => setActivePreviewKey((k) => (k === key ? null : key));
 
   useSSE(state.streamUrl, onSSEEvent);
 
@@ -72,6 +77,17 @@ export function AnnouncePage() {
         />
       </>
     );
+  } else if (state.stage === "screenshot-plan-review" && state.screenshotPlan) {
+    rightContent = (
+      <>
+        <div className="section-heading">Screenshot Plan</div>
+        <ScreenshotPlanCard
+          plan={state.screenshotPlan}
+          onConfirm={confirmScreenshotPlan}
+          onAbort={abortPlan}
+        />
+      </>
+    );
   } else if ((state.stage === "preview" || state.stage === "done") && Object.keys(state.texts).length > 0) {
     rightContent = (
       <>
@@ -92,6 +108,8 @@ export function AnnouncePage() {
             platformKey={key}
             value={text}
             onChange={updateText}
+            onPreview={togglePreview}
+            previewActive={activePreviewKey === key}
           />
         ))}
 
@@ -103,7 +121,7 @@ export function AnnouncePage() {
         )}
       </>
     );
-  } else if (state.stage === "running" || state.stage === "starting" || state.stage === "posting") {
+  } else if (state.stage === "running" || state.stage === "starting" || state.stage === "posting" || state.stage === "screenshot-plan-review" && !state.screenshotPlan) {
     rightContent = (
       <div className="preview-panel__empty">
         <span className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
@@ -180,5 +198,17 @@ export function AnnouncePage() {
     </div>
   );
 
-  return <SplitPane left={left} right={right} />;
+  return (
+    <>
+      <SplitPane left={left} right={right} />
+      {activePreviewKey && state.texts[activePreviewKey] && (
+        <ContentPreview
+          platformKey={activePreviewKey}
+          text={state.texts[activePreviewKey]}
+          sessionId={state.sessionId}
+          onClose={() => setActivePreviewKey(null)}
+        />
+      )}
+    </>
+  );
 }

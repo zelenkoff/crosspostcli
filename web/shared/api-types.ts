@@ -20,6 +20,14 @@ export interface AuthOptions {
   token?: string;
   /** Cookie string (e.g. "session=abc123") */
   cookies?: string;
+  /** Login page URL — will navigate here first and fill the form */
+  loginUrl?: string;
+  /** CSS selector for the username/email field on the login page */
+  loginUsernameSelector?: string;
+  /** CSS selector for the password field on the login page */
+  loginPasswordSelector?: string;
+  /** CSS selector for the submit button (default: button[type="submit"]) */
+  loginSubmitSelector?: string;
 }
 
 export interface AnnounceStartRequest {
@@ -45,6 +53,7 @@ export interface AnnounceStartResponse {
 export type SSEEvent =
   | { type: "phase"; phase: string; detail: string }
   | { type: "plan"; contentPlan: ContentPlanDTO }
+  | { type: "screenshot_plan"; screenshotPlan: ScreenshotPlanDTO }
   | { type: "texts"; texts: Record<string, string> }
   | { type: "screenshot_ready"; index: number; description: string }
   | { type: "complete" }
@@ -58,9 +67,26 @@ export interface ContentPlanDTO {
   suggestedTone: string;
 }
 
+export interface ScreenshotInstructionDTO {
+  url: string;
+  selector?: string;
+  highlight?: string[];
+  description: string;
+}
+
+export interface ScreenshotPlanDTO {
+  reasoning: string;
+  screenshots: ScreenshotInstructionDTO[];
+}
+
 export interface PlanActionRequest {
   action: "continue" | "revise" | "abort";
   feedback?: string;
+}
+
+export interface ScreenshotPlanActionRequest {
+  /** The (possibly edited) screenshot instructions to proceed with */
+  screenshots: ScreenshotInstructionDTO[];
 }
 
 export interface ReviseRequest {
