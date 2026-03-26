@@ -3,7 +3,7 @@ import { createAdapters, filterAdapters } from "../../../src/core/engine.js";
 import { buildAiOptions } from "../../../src/core/ai-generator.js";
 import { generateWithAi } from "../../../src/core/ai-generator.js";
 import { runAgentLoop, reviseAgentContent } from "../../../src/core/ai-loop.js";
-import { getCommitRange, getDiffForRange, getUiDiff, getProjectName } from "../../../src/core/changelog.js";
+import { getCommitRange, getDiffForRange, getProjectName } from "../../../src/core/changelog.js";
 import { detectTemplate } from "../../../src/core/announce-templates.js";
 import type { AnnounceContext, Tone, Verbosity } from "../../../src/core/announce-templates.js";
 import type { PostOptions } from "../../../src/core/engine.js";
@@ -195,12 +195,6 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
         tag: body.tag,
       }).catch(() => null);
 
-      const uiDiff = await getUiDiff({
-        commits: body.commits,
-        since: body.since,
-        tag: body.tag,
-      }).catch(() => null);
-
       const result = await runAgentLoop({
         aiOptions: aiOpts,
         context,
@@ -208,7 +202,6 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
         adapters,
         verbosity: body.verbosity as Verbosity | undefined,
         diff: diff || undefined,
-        uiDiff: uiDiff || undefined,
         language: body.lang,
         onStatus: (phase, detail) => {
           emitPhase(phase, detail);

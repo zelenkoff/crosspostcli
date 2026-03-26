@@ -12,10 +12,10 @@
     "build": "bun build src/cli.tsx --compile --outfile dist/crosspost",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test",
-    "web:server": "bun run web/server/index.ts",
-    "web:client": "vite --config web/vite.config.ts",
+    "web:server": "bun web/server/index.ts",
+    "web:client": "bunx vite --config web/vite.config.ts",
     "web:dev": "concurrently \"bun run web:server\" \"bun run web:client\"",
-    "web:build": "vite build --config web/vite.config.ts"
+    "web:build": "bunx vite build --config web/vite.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
