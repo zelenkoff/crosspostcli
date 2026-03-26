@@ -40,21 +40,36 @@ export async function handleAnnounceStream(sessionId: string): Promise<Response>
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
+      let done = false;
 
       const send = (event: SSEEvent) => {
         const data = `data: ${JSON.stringify(event)}\n\n`;
         controller.enqueue(encoder.encode(data));
       };
 
+      // Keepalive: send SSE comment every 15s to prevent browser from closing
+      // the connection during long pauses (e.g. plan-review waiting for user input).
+      const keepalive = setInterval(() => {
+        if (done) return;
+        try {
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
+        } catch {
+          clearInterval(keepalive);
+        }
+      }, 15_000);
+
       while (true) {
         const event = await session.queue.next();
         if (event === null) {
-          // Queue closed
+          done = true;
+          clearInterval(keepalive);
           controller.close();
           break;
         }
         send(event);
         if (event.type === "complete" || event.type === "error") {
+          done = true;
+          clearInterval(keepalive);
           controller.close();
           break;
         }
