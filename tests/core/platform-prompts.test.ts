@@ -52,16 +52,16 @@ describe("PLATFORM_FORMATTING_RULES", () => {
     expect(PLATFORM_FORMATTING_RULES.telegram).toContain("clickable link");
   });
 
-  test("medium rules mention multiple screenshots", () => {
-    expect(PLATFORM_FORMATTING_RULES.medium).toContain("MULTIPLE");
+  test("medium rules mention screenshots per section", () => {
+    expect(PLATFORM_FORMATTING_RULES.medium).toContain("screenshot");
   });
 
   test("x rules mention 280 characters", () => {
     expect(PLATFORM_FORMATTING_RULES.x).toContain("280");
   });
 
-  test("blog rules mention multiple screenshots", () => {
-    expect(PLATFORM_FORMATTING_RULES.blog).toContain("MULTIPLE");
+  test("blog rules mention screenshot placement", () => {
+    expect(PLATFORM_FORMATTING_RULES.blog).toContain("SCREENSHOT PLACEMENT");
   });
 });
 
@@ -119,7 +119,7 @@ describe("default system prompts", () => {
   });
 
   test("compose prompt discourages generic CTAs", () => {
-    expect(DEFAULT_COMPOSE_SYSTEM_PROMPT).toContain("Never use generic marketing CTAs");
+    expect(DEFAULT_COMPOSE_SYSTEM_PROMPT).toContain("Never use generic CTAs");
   });
 
   test("analysis prompt focuses on end users", () => {

@@ -30,4 +30,6 @@ export interface Adapter {
   supportsHtml: boolean;
   supportsMarkdown: boolean;
   formatText(text: string): string;
+  /** Configured language for this platform/channel set (e.g. "ru", "en") */
+  language?: string;
 }

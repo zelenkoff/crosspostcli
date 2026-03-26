@@ -18,6 +18,7 @@ export interface PostOptions {
   blogTitle?: string;
   blogTags?: string[];
   perPlatformText?: Record<string, string>;
+  perPlatformImages?: Record<string, Buffer[]>;
 }
 
 export type PostingEvent =
@@ -30,7 +31,22 @@ export function createAdapters(config: Config, options?: PostOptions): Map<strin
   const p = config.platforms;
 
   if (p.telegram.enabled && p.telegram.bot_token) {
-    adapters.set("telegram", new TelegramAdapter(p.telegram));
+    const languages = [...new Set(p.telegram.channels.map((c) => c.language ?? "").filter(Boolean))];
+    const hasNoLang = p.telegram.channels.some((c) => !c.language);
+
+    if (languages.length > 1 || (languages.length === 1 && hasNoLang)) {
+      // Mixed languages — create one adapter per language group so AI generates separate texts
+      for (const lang of languages) {
+        const langChannels = p.telegram.channels.filter((c) => c.language === lang);
+        adapters.set(`telegram:${lang}`, new TelegramAdapter({ ...p.telegram, channels: langChannels }));
+      }
+      if (hasNoLang) {
+        const noLangChannels = p.telegram.channels.filter((c) => !c.language);
+        adapters.set("telegram", new TelegramAdapter({ ...p.telegram, channels: noLangChannels }));
+      }
+    } else {
+      adapters.set("telegram", new TelegramAdapter(p.telegram));
+    }
   }
   if (p.x.enabled && p.x.api_key) {
     adapters.set("x", new XTwitterAdapter(p.x));
@@ -45,7 +61,21 @@ export function createAdapters(config: Config, options?: PostOptions): Map<strin
     adapters.set("medium", new MediumAdapter(p.medium));
   }
   if (p.discord.enabled && p.discord.webhooks.length > 0) {
-    adapters.set("discord", new DiscordAdapter(p.discord));
+    const languages = [...new Set(p.discord.webhooks.map((w) => w.language ?? "").filter(Boolean))];
+    const hasNoLang = p.discord.webhooks.some((w) => !w.language);
+
+    if (languages.length > 1 || (languages.length === 1 && hasNoLang)) {
+      for (const lang of languages) {
+        const langWebhooks = p.discord.webhooks.filter((w) => w.language === lang);
+        adapters.set(`discord:${lang}`, new DiscordAdapter({ ...p.discord, webhooks: langWebhooks }));
+      }
+      if (hasNoLang) {
+        const noLangWebhooks = p.discord.webhooks.filter((w) => !w.language);
+        adapters.set("discord", new DiscordAdapter({ ...p.discord, webhooks: noLangWebhooks }));
+      }
+    } else {
+      adapters.set("discord", new DiscordAdapter(p.discord));
+    }
   }
   if (p.blog.enabled && p.blog.content_dir) {
     adapters.set(
@@ -101,6 +131,11 @@ export async function postToAll(
       platformContent.text = options.perPlatformText[key];
     }
 
+    // Use per-platform images if available (agent loop assigns different screenshots per platform)
+    if (options.perPlatformImages?.[key]) {
+      platformContent.images = options.perPlatformImages[key];
+    }
+
     // Optimize images per platform
     if (platformContent.images && platformContent.images.length > 0) {
       platformContent.images = await Promise.all(
@@ -132,10 +167,10 @@ export async function validateAll(
     try {
       const valid = await adapter.validate();
       results.set(key, valid);
-      onEvent?.(adapter.name, valid);
+      onEvent?.(key, valid);
     } catch {
       results.set(key, false);
-      onEvent?.(adapter.name, false);
+      onEvent?.(key, false);
     }
   });
 

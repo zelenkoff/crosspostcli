@@ -40,10 +40,13 @@ export class BlueskyAdapter implements Adapter {
   supportsImages = true;
   supportsHtml = false;
   supportsMarkdown = false;
+  language: string | undefined;
 
   private session: BlueskySession | null = null;
 
-  constructor(private config: BlueskyConfig) {}
+  constructor(private config: BlueskyConfig) {
+    this.language = config.language;
+  }
 
   formatText(text: string): string {
     // Bluesky counts graphemes, not bytes

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Box, Text, render, useInput } from "ink";
+import { Box, Text, render, useInput, useStdin } from "ink";
 import Spinner from "ink-spinner";
 import { loadConfig } from "../config/store.js";
 import { createAdapters, filterAdapters, postToAll, type PostOptions } from "../core/engine.js";
@@ -22,7 +22,7 @@ import { captureScreenshot, type ScreenshotOptions } from "../screenshot/capture
 import { getPreset, presetToOptions } from "../screenshot/presets.js";
 import { discoverFeatures, type DiscoveryResult, type DiscoveredFeature } from "../core/discover.js";
 import { readFileSync } from "fs";
-import { getDiffForRange } from "../core/changelog.js";
+import { getDiffForRange, getUiDiff } from "../core/changelog.js";
 import { generateWithAi, buildAiOptions } from "../core/ai-generator.js";
 import { runAgentLoop, reviseAgentContent, getScreenshotsForPlatform, type AgentPhase, type AgentLoopResult, type ContentPlan } from "../core/ai-loop.js";
 import type { AuthOptions } from "../screenshot/capture.js";
@@ -77,6 +77,8 @@ export interface AnnounceCommandOptions {
   slowMo?: number;
   /** Custom system prompt for AI content generation */
   systemPrompt?: string;
+  /** Language code for this post (e.g. ru, en, es) — routes to matching channels, AI writes in this language */
+  lang?: string;
 }
 
 type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "content-revise" | "revising" | "posting" | "done" | "error";
@@ -106,6 +108,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [aiWarning, setAiWarning] = useState<string | null>(null);
   const [agentLoopResult, setAgentLoopResult] = useState<AgentLoopResult | null>(null);
   const [agentStatus, setAgentStatus] = useState<string>("");
+  const [agentPhase, setAgentPhase] = useState<AgentPhase | null>(null);
   const [contentPlan, setContentPlan] = useState<ContentPlan | null>(null);
   const [planFeedback, setPlanFeedback] = useState<string>("");
   const [contentReviseInput, setContentReviseInput] = useState<string>("");
@@ -113,6 +116,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const planResolverRef = React.useRef<((result: { action: "continue" | "revise" | "abort"; feedback?: string }) => void) | null>(null);
   // Guard: prevent the agent-loop useEffect from re-running while the loop is already in progress
   const agentLoopRunningRef = React.useRef(false);
+
+  const { isRawModeSupported } = useStdin();
+  const rawModeOk = isRawModeSupported === true;
 
   // Handle keyboard input during preview phase
   useInput(
@@ -128,7 +134,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         setPhase("content-revise");
       }
     },
-    { isActive: phase === "preview" },
+    { isActive: phase === "preview" && rawModeOk },
   );
 
   // Handle keyboard input during plan-review phase
@@ -169,7 +175,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         setPlanFeedback((prev) => prev + input);
       }
     },
-    { isActive: phase === "plan-review" },
+    { isActive: phase === "plan-review" && rawModeOk },
   );
 
   // Handle keyboard input during content-revise phase
@@ -189,7 +195,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         setContentReviseInput((prev) => prev + input);
       }
     },
-    { isActive: phase === "content-revise" },
+    { isActive: phase === "content-revise" && rawModeOk },
   );
 
   // Phase: Revising content with AI feedback
@@ -220,6 +226,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             verbosity: (options.verbosity as Verbosity) ?? undefined,
             diff: undefined,
             systemPrompt: options.systemPrompt,
+            language: options.lang,
           });
           setGeneratedTexts(revised.texts);
           // Update the agent loop result titles if revised
@@ -247,6 +254,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             diff || undefined,
             options.systemPrompt,
             { previousTexts: generatedTexts, feedback },
+            options.lang,
           );
           setGeneratedTexts(texts);
         }
@@ -364,6 +372,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         const result = await discoverFeatures({
           url: options.discover!,
           changelog: context.changelog,
+          description: context.description,
           keywords: options.discoverKeywords,
           maxPages: options.discoverMaxPages,
           delay: options.screenshotDelay,
@@ -445,11 +454,10 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           return;
         }
 
-        const diff = await getDiffForRange({
-          commits: options.commits,
-          since: options.since,
-          tag: options.tag,
-        }).catch(() => null);
+        const [diff, uiDiff] = await Promise.all([
+          getDiffForRange({ commits: options.commits, since: options.since, tag: options.tag }).catch(() => null),
+          getUiDiff({ commits: options.commits, since: options.since, tag: options.tag }).catch(() => null),
+        ]);
 
         const result = await runAgentLoop({
           aiOptions: aiOpts,
@@ -458,6 +466,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           adapters,
           verbosity: (options.verbosity as Verbosity) ?? undefined,
           diff: diff || undefined,
+          uiDiff: uiDiff || undefined,
           screenshotDefaults: {
             device: options.discoverDevice ?? options.screenshotDevice,
             darkMode: options.screenshotDark,
@@ -469,7 +478,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           maxScreenshots: options.discoverMaxPages ?? 4,
           auth: options.auth,
           systemPrompt: options.systemPrompt,
-          onStatus: (_phase: AgentPhase, detail: string) => {
+          language: options.lang,
+          onStatus: (currentPhase: AgentPhase, detail: string) => {
+            setAgentPhase(currentPhase);
             setAgentStatus(detail);
           },
           onPlanReady: async (plan: ContentPlan) => {
@@ -591,7 +602,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           tag: options.tag,
         });
 
-        const texts = await generateWithAi(context, adapters, aiOpts, verbosity, diff || undefined, options.systemPrompt);
+        const texts = await generateWithAi(context, adapters, aiOpts, verbosity, diff || undefined, options.systemPrompt, undefined, options.lang);
         setGeneratedTexts(texts);
         setAiUsed(true);
         setPhase("preview");
@@ -673,15 +684,26 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           }
         }
 
-        // Load images
+        // Load images (fallback for non-agent-loop path)
         const images: Buffer[] = [];
         if (options.image) {
           for (const imgPath of options.image) {
             images.push(readFileSync(imgPath));
           }
         }
-        if (screenshotBuffer) {
+        if (screenshotBuffer && !agentLoopResult) {
           images.push(screenshotBuffer);
+        }
+
+        // Per-platform images from agent loop (each platform gets its assigned screenshots)
+        const perPlatformImages: Record<string, Buffer[]> = {};
+        if (agentLoopResult) {
+          for (const [key] of adapters) {
+            const platformImages = getScreenshotsForPlatform(agentLoopResult, key);
+            if (platformImages.length > 0) {
+              perPlatformImages[key] = platformImages;
+            }
+          }
         }
 
         // The default text (used as fallback)
@@ -691,6 +713,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           text: defaultText,
           images: images.length > 0 ? images : undefined,
           url: context.url,
+          language: options.lang,
         };
 
         // Initialize platform states
@@ -700,6 +723,10 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           status: "pending" as StatusState,
         }));
         setPlatformStates(initial);
+
+        if (Object.keys(perPlatformImages).length > 0) {
+          postOptions.perPlatformImages = perPlatformImages;
+        }
 
         const allResults = await postToAll(adapters, content, postOptions, (event) => {
           if (event.type === "start") {
@@ -791,15 +818,27 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   }
 
   if (phase === "agent-loop") {
+    const phaseLabel =
+      agentPhase === "screenshotting" ? (agentStatus || "Capturing screenshots...") :
+      agentPhase === "analyzing"      ? "Analyzing changes..." :
+      agentPhase === "planning"       ? "Planning screenshots..." :
+      agentPhase === "composing"      ? "Writing posts from screenshots..." :
+      agentPhase === "done"           ? "Done" :
+      "Starting AI agent...";
     return (
       <Box flexDirection="column" paddingX={1}>
         <StepIndicator current={contentPlan ? 3 : 2} total={5} label="AI agent loop" />
         <Box marginTop={1}>
           <Text>
             <Text color="green"><Spinner type="dots" /></Text>
-            {" "}AI is analyzing, screenshotting, and composing...
+            {" "}{phaseLabel}
           </Text>
         </Box>
+        {agentStatus && agentPhase !== "screenshotting" && agentStatus !== phaseLabel && (
+          <Box marginLeft={3} marginTop={1}>
+            <Text dimColor>{agentStatus}</Text>
+          </Box>
+        )}
         {contentPlan && (
           <Box marginTop={1} marginLeft={2} flexDirection="column">
             <Text bold color="cyan">Content Plan:</Text>
@@ -810,13 +849,7 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
               {contentPlan.keyChanges.map((change, i) => (
                 <Text key={i}>  - {change}</Text>
               ))}
-              <Text><Text bold>Screenshot strategy:</Text> {contentPlan.screenshotStrategy}</Text>
             </Box>
-          </Box>
-        )}
-        {agentStatus && (
-          <Box marginLeft={3} marginTop={1}>
-            <Text dimColor>{agentStatus}</Text>
           </Box>
         )}
       </Box>

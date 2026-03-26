@@ -90,14 +90,13 @@ describe("MCP server", () => {
     expect(text.length).toBeGreaterThan(0);
   });
 
-  test("post tool handles missing config gracefully", async () => {
+  test("post tool runs in dry-run mode", async () => {
     const { client } = await createTestClient();
     const result = await client.callTool({
       name: "post",
-      arguments: { text: "Hello from MCP test" },
+      arguments: { text: "Hello from MCP test", dry_run: true },
     });
     const text = (result.content as Array<{ type: string; text: string }>)[0].text;
-    // Should either post or explain config is needed
     expect(text.length).toBeGreaterThan(0);
   });
 

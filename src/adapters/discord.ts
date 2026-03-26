@@ -8,8 +8,13 @@ export class DiscordAdapter implements Adapter {
   supportsImages = true;
   supportsHtml = false;
   supportsMarkdown = true;
+  language: string | undefined;
 
-  constructor(private config: DiscordConfig) {}
+  constructor(private config: DiscordConfig) {
+    // If all webhooks share the same language, expose it for AI generation routing
+    const langs = [...new Set(config.webhooks.map((w) => w.language).filter(Boolean))];
+    this.language = langs.length === 1 ? langs[0] : undefined;
+  }
 
   formatText(text: string): string {
     if (text.length <= this.maxTextLength) return text;

@@ -55,12 +55,18 @@ function buildPrompt(
   diff?: string,
   systemPrompt?: string,
   revisionFeedback?: { previousTexts: Map<string, string>; feedback: string },
+  language?: string,
+  perPlatformLanguage?: Record<string, string>,
 ): { system: string; user: string } {
   const system = resolveSystemPrompt(DEFAULT_SIMPLE_SYSTEM_PROMPT, undefined, systemPrompt);
 
   const parts: string[] = [];
 
-  parts.push("Write social media posts for the following software update.\n");
+  // Global language instruction (when --lang is passed)
+  const languageInstruction = language
+    ? ` Write ALL post content in ${language} language (ISO 639-1 code: "${language}"). Do not write in any other language.`
+    : "";
+  parts.push(`Write social media posts for the following software update.${languageInstruction}\n`);
 
   parts.push(`## Project`);
   parts.push(`Name: ${ctx.projectName}`);
@@ -94,6 +100,15 @@ function buildPrompt(
   parts.push(`\n## Target Platforms`);
   parts.push("Generate a post for EACH of the following platforms. Respect the character limit strictly.\n");
   parts.push(buildPlatformInstructions(platforms.map((p) => ({ ...p, supportsImages: false }))));
+
+  // Per-platform language overrides (when platforms have different configured languages)
+  if (perPlatformLanguage && Object.keys(perPlatformLanguage).length > 0 && !language) {
+    parts.push(`\n## Per-Platform Language`);
+    parts.push(`Write each platform's post in its specified language:`);
+    for (const [key, lang] of Object.entries(perPlatformLanguage)) {
+      parts.push(`- ${key}: write in ${lang} language (ISO 639-1: "${lang}")`);
+    }
+  }
 
   if (revisionFeedback) {
     parts.push(`\n## Revision Request`);
@@ -186,6 +201,7 @@ export async function generateWithAi(
   diff?: string,
   systemPrompt?: string,
   revisionFeedback?: { previousTexts: Map<string, string>; feedback: string },
+  language?: string,
 ): Promise<Map<string, string>> {
   const platforms: PlatformConstraint[] = Array.from(adapters.entries()).map(([key, adapter]) => ({
     key,
@@ -195,7 +211,16 @@ export async function generateWithAi(
     supportsHtml: adapter.supportsHtml,
   }));
 
-  const prompt = buildPrompt(ctx, platforms, verbosity, diff, systemPrompt, revisionFeedback);
+  // Build per-platform language map from adapter config (used when --lang is not set globally)
+  const perPlatformLanguage: Record<string, string> = {};
+  if (!language) {
+    for (const [key, adapter] of adapters) {
+      if (adapter.language) perPlatformLanguage[key] = adapter.language;
+    }
+  }
+
+  const prompt = buildPrompt(ctx, platforms, verbosity, diff, systemPrompt, revisionFeedback, language,
+    Object.keys(perPlatformLanguage).length > 0 ? perPlatformLanguage : undefined);
 
   let raw: string;
   try {

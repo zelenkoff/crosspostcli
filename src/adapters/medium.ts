@@ -10,10 +10,13 @@ export class MediumAdapter implements Adapter {
   supportsImages = false;
   supportsHtml = true;
   supportsMarkdown = true;
+  language: string | undefined;
 
   private userId: string | null = null;
 
-  constructor(private config: MediumConfig) {}
+  constructor(private config: MediumConfig) {
+    this.language = config.language;
+  }
 
   formatText(text: string): string {
     return text;

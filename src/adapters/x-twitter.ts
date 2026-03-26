@@ -13,8 +13,11 @@ export class XTwitterAdapter implements Adapter {
   supportsImages = true;
   supportsHtml = false;
   supportsMarkdown = false;
+  language: string | undefined;
 
-  constructor(private config: XConfig) {}
+  constructor(private config: XConfig) {
+    this.language = config.language;
+  }
 
   formatText(text: string): string {
     if (text.length <= this.maxTextLength) return text;

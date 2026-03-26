@@ -58,6 +58,12 @@ export interface ScreenshotOptions {
   headed?: boolean;
   /** Slow down Playwright actions by this many ms (default: 800 when headed, 0 otherwise) */
   slowMo?: number;
+  /** Highlight style: "outline" (default red border), "glow" (blue glow), "spotlight" (dim everything else) */
+  highlightMode?: "outline" | "glow" | "spotlight";
+  /** Auto-crop screenshot around the highlighted/selected element. Adds cropPadding around the bounding box. */
+  smartCrop?: boolean;
+  /** Padding in px around the element when smartCrop is enabled (default: 80) */
+  cropPadding?: number;
 }
 
 export interface ScreenshotResult {
@@ -101,6 +107,14 @@ const DEVICE_PRESETS: Record<string, { viewport: { width: number; height: number
   },
   "macbook-pro": {
     viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+  },
+  "blog-1440": {
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+  },
+  "blog-1200": {
+    viewport: { width: 1200, height: 800 },
     deviceScaleFactor: 2,
   },
 };
@@ -219,8 +233,9 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
 
     // Auth: login flow — fill form and submit before navigating to target
     if (auth?.login) {
+      const loginUrl = new URL(auth.login.url);
       await page.goto(auth.login.url, { waitUntil: waitStrategy, timeout: 30_000 });
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(1500);
 
       for (const [selector, value] of Object.entries(auth.login.fields)) {
         await page.fill(selector, value);
@@ -228,11 +243,27 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
 
       const submitSelector = auth.login.submit ?? 'button[type="submit"]';
       await Promise.all([
-        page.waitForNavigation({ waitUntil: waitStrategy, timeout: 15_000 }).catch(() => {}),
+        page.waitForNavigation({ waitUntil: "networkidle", timeout: 20_000 }).catch(() => {}),
         page.click(submitSelector),
       ]);
 
-      await page.waitForTimeout(auth.login.waitAfter ?? 3000);
+      await page.waitForTimeout(auth.login.waitAfter ?? 4000);
+
+      // Verify login succeeded
+      const currentUrl = new URL(page.url());
+      const stillOnLogin =
+        currentUrl.pathname === loginUrl.pathname ||
+        currentUrl.pathname.startsWith("/login") ||
+        currentUrl.pathname.startsWith("/signin") ||
+        currentUrl.pathname.startsWith("/auth/login");
+
+      if (stillOnLogin) {
+        throw new Error(
+          `Login failed — still on login page after submit (${page.url()}).\n` +
+          `Check that your --auth-login-fields selectors and credentials are correct.\n` +
+          `Tip: run with --headed to watch the login attempt in a browser window.`
+        );
+      }
     }
 
     // Navigate to target
@@ -248,8 +279,8 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
     if (options.hide && options.hide.length > 0) {
       for (const selector of options.hide) {
         await page.evaluate((sel: string) => {
-          document.querySelectorAll(sel).forEach((el) => {
-            (el as HTMLElement).style.display = "none";
+          (globalThis as any).document.querySelectorAll(sel).forEach((el: any) => {
+            el.style.display = "none";
           });
         }, selector);
       }
@@ -261,16 +292,37 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
       : [];
 
     if (highlights.length > 0) {
-      for (const selector of highlights) {
-        await page.evaluate((sel: string) => {
-          document.querySelectorAll(sel).forEach((el) => {
-            (el as HTMLElement).style.outline = "3px solid #FF4444";
-            (el as HTMLElement).style.outlineOffset = "2px";
-          });
-        }, selector);
+      const mode = options.highlightMode ?? "outline";
+      if (mode === "spotlight") {
+        const selectorList = highlights.join(", ");
+        await page.addStyleTag({
+          content: `
+            body, body * { filter: brightness(0.45) !important; }
+            ${highlights.map(sel => `${sel}, ${sel} *`).join(", ")} { filter: brightness(1) !important; }
+            ${selectorList} { outline: 2px solid rgba(255,255,255,0.6) !important; outline-offset: 3px !important; border-radius: 4px !important; position: relative !important; z-index: 9999 !important; }
+          `,
+        });
+        await page.waitForTimeout(200);
+      } else {
+        for (const selector of highlights) {
+          await page.evaluate(({ sel, highlightMode }: { sel: string; highlightMode: string }) => {
+            (globalThis as any).document.querySelectorAll(sel).forEach((el: any) => {
+              if (highlightMode === "glow") {
+                el.style.outline = "2px solid #2563EB";
+                el.style.outlineOffset = "3px";
+                el.style.boxShadow = "0 0 0 4px rgba(37, 99, 235, 0.2), 0 0 20px rgba(37, 99, 235, 0.35)";
+                el.style.borderRadius = "4px";
+                el.style.position = "relative";
+                el.style.zIndex = "999";
+              } else {
+                el.style.outline = "3px solid #FF4444";
+                el.style.outlineOffset = "2px";
+              }
+            });
+          }, { sel: selector, highlightMode: mode });
+        }
+        await page.waitForTimeout(200);
       }
-      // Brief pause to render highlights
-      await page.waitForTimeout(200);
     }
 
     // Capture
@@ -302,7 +354,7 @@ export async function captureScreenshot(options: ScreenshotOptions): Promise<Scr
     let width = viewport.width;
     let height = viewport.height;
     if (options.selector) {
-      const box = await page.$(options.selector).then(async (el) => el?.boundingBox());
+      const box = await page.$(options.selector).then(async (el: any) => el?.boundingBox());
       if (box) {
         width = Math.round(box.width * scaleFactor);
         height = Math.round(box.height * scaleFactor);
@@ -431,21 +483,43 @@ export class BrowserSession {
       return;
     }
 
-    const waitStrategy = "domcontentloaded" as const;
-    await this.page.goto(auth.login.url, { waitUntil: waitStrategy, timeout: 30_000 });
-    await this.page.waitForTimeout(1000);
+    const loginUrl = new URL(auth.login.url);
 
+    // Navigate to login page and wait for it to be interactive
+    await this.page.goto(auth.login.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await this.page.waitForTimeout(1500);
+
+    // Fill form fields
     for (const [selector, value] of Object.entries(auth.login.fields)) {
       await this.page.fill(selector, value);
     }
 
+    // Submit — use networkidle to catch SPA client-side redirects after login
     const submitSelector = auth.login.submit ?? 'button[type="submit"]';
     await Promise.all([
-      this.page.waitForNavigation({ waitUntil: waitStrategy, timeout: 15_000 }).catch(() => {}),
+      this.page.waitForNavigation({ waitUntil: "networkidle", timeout: 20_000 }).catch(() => {}),
       this.page.click(submitSelector),
     ]);
 
-    await this.page.waitForTimeout(auth.login.waitAfter ?? 3000);
+    // Extra settle time for slow SPA redirects (default 4s, more than before)
+    await this.page.waitForTimeout(auth.login.waitAfter ?? 4000);
+
+    // Verify login succeeded: current URL should not still be the login page
+    const currentUrl = new URL(this.page.url());
+    const stillOnLogin =
+      currentUrl.pathname === loginUrl.pathname ||
+      currentUrl.pathname.startsWith("/login") ||
+      currentUrl.pathname.startsWith("/signin") ||
+      currentUrl.pathname.startsWith("/auth/login");
+
+    if (stillOnLogin) {
+      throw new Error(
+        `Login failed — still on login page after submit (${this.page.url()}).\n` +
+        `Check that your --auth-login-fields selectors and credentials are correct.\n` +
+        `Tip: run with --headed to watch the login attempt in a browser window.`
+      );
+    }
+
     this.authenticated = true;
   }
 
@@ -459,18 +533,29 @@ export class BrowserSession {
     format?: "png" | "jpeg";
     quality?: number;
     fullPage?: boolean;
+    highlightMode?: "outline" | "glow" | "spotlight";
+    smartCrop?: boolean;
+    cropPadding?: number;
+    clicks?: string[];
   }): Promise<ScreenshotResult> {
     if (!this.browser || !this.page) throw new Error("BrowserSession not initialized. Call init() first.");
 
     // Authenticate on first use
     await this.authenticate();
 
-    const waitStrategy = "domcontentloaded" as const;
-    await this.page.goto(opts.url, { waitUntil: waitStrategy, timeout: 30_000 });
+    await this.page.goto(opts.url, { waitUntil: "networkidle", timeout: 30_000 });
 
     const delay = opts.delay ?? this.options.delay ?? 3000;
     if (delay > 0) {
       await this.page.waitForTimeout(delay);
+    }
+
+    // Click elements (e.g. to activate a tab before screenshotting)
+    if (opts.clicks && opts.clicks.length > 0) {
+      for (const clickSel of opts.clicks) {
+        await this.page.click(clickSel).catch(() => {});
+        await this.page.waitForTimeout(300);
+      }
     }
 
     // Hide elements
@@ -478,8 +563,8 @@ export class BrowserSession {
     if (hideSelectors.length > 0) {
       for (const selector of hideSelectors) {
         await this.page.evaluate((sel: string) => {
-          document.querySelectorAll(sel).forEach((el: any) => {
-            (el as any).style.display = "none";
+          (globalThis as any).document.querySelectorAll(sel).forEach((el: any) => {
+            el.style.display = "none";
           });
         }, selector);
       }
@@ -488,15 +573,59 @@ export class BrowserSession {
     // Highlight
     const highlights = opts.highlight ?? [];
     if (highlights.length > 0) {
-      for (const selector of highlights) {
-        await this.page.evaluate((sel: string) => {
-          document.querySelectorAll(sel).forEach((el: any) => {
-            (el as any).style.outline = "3px solid #FF4444";
-            (el as any).style.outlineOffset = "2px";
-          });
-        }, selector);
+      const mode = opts.highlightMode ?? this.options.highlightMode ?? "outline";
+      if (mode === "spotlight") {
+        const selectorList = highlights.join(", ");
+        await this.page.addStyleTag({
+          content: `
+            body, body * { filter: brightness(0.45) !important; }
+            ${highlights.map((sel: string) => `${sel}, ${sel} *`).join(", ")} { filter: brightness(1) !important; }
+            ${selectorList} { outline: 2px solid rgba(255,255,255,0.6) !important; outline-offset: 3px !important; border-radius: 4px !important; position: relative !important; z-index: 9999 !important; }
+          `,
+        });
+        await this.page.waitForTimeout(200);
+      } else {
+        for (const selector of highlights) {
+          await this.page.evaluate(({ sel, highlightMode }: { sel: string; highlightMode: string }) => {
+            (globalThis as any).document.querySelectorAll(sel).forEach((el: any) => {
+              if (highlightMode === "glow") {
+                el.style.outline = "2px solid #2563EB";
+                el.style.outlineOffset = "3px";
+                el.style.boxShadow = "0 0 0 4px rgba(37, 99, 235, 0.2), 0 0 20px rgba(37, 99, 235, 0.35)";
+                el.style.borderRadius = "4px";
+                el.style.position = "relative";
+                el.style.zIndex = "999";
+              } else {
+                el.style.outline = "3px solid #FF4444";
+                el.style.outlineOffset = "2px";
+              }
+            });
+          }, { sel: selector, highlightMode: mode });
+        }
+        await this.page.waitForTimeout(200);
       }
-      await this.page.waitForTimeout(200);
+    }
+
+    // Smart crop: clip screenshot around highlighted/selected element + padding
+    const isSmartCrop = opts.smartCrop ?? this.options.smartCrop ?? false;
+    let clipBox: { x: number; y: number; width: number; height: number } | undefined;
+    if (isSmartCrop && !(opts.fullPage ?? false)) {
+      const targetSelector = (highlights.length > 0 ? highlights[0] : null) ?? opts.selector ?? null;
+      if (targetSelector) {
+        const el = await this.page.$(targetSelector);
+        const box = el ? await el.boundingBox() : null;
+        if (box) {
+          const pad = opts.cropPadding ?? this.options.cropPadding ?? 80;
+          const vw = this.viewport.width;
+          const vh = this.viewport.height;
+          clipBox = {
+            x: Math.max(0, box.x - pad),
+            y: Math.max(0, box.y - pad),
+            width: Math.min(box.width + pad * 2, vw - Math.max(0, box.x - pad)),
+            height: Math.min(box.height + pad * 2, vh - Math.max(0, box.y - pad)),
+          };
+        }
+      }
     }
 
     // Capture
@@ -504,31 +633,41 @@ export class BrowserSession {
     const screenshotOptions: Record<string, unknown> = {
       type: format,
       fullPage: opts.fullPage ?? false,
+      ...(clipBox ? { clip: clipBox } : {}),
     };
     if (format === "jpeg") {
       screenshotOptions.quality = opts.quality ?? this.options.quality ?? 90;
     }
 
     let screenshotBuffer: Buffer;
-    if (opts.selector) {
+    let usedSelector = false;
+    if (opts.selector && !clipBox) {
       const element = await this.page.$(opts.selector);
-      if (!element) {
-        // Selector not found — fall back to full-page screenshot instead of failing
-        screenshotBuffer = await this.page.screenshot({ ...screenshotOptions, fullPage: true }) as Buffer;
-      } else {
+      if (element) {
         screenshotBuffer = await element.screenshot(screenshotOptions) as Buffer;
+        usedSelector = true;
+      } else {
+        // Selector not found — log warning and fall back to full viewport
+        process.stderr.write(`[crosspost] Warning: selector "${opts.selector}" not found on ${opts.url}, falling back to full viewport\n`);
+        screenshotBuffer = await this.page.screenshot(screenshotOptions) as Buffer;
       }
     } else {
       screenshotBuffer = await this.page.screenshot(screenshotOptions) as Buffer;
     }
 
-    let width = this.viewport.width;
-    let height = this.viewport.height;
-    if (opts.selector) {
-      const box = await this.page.$(opts.selector).then(async (el: any) => el?.boundingBox());
+    let width: number;
+    let height: number;
+    if (clipBox) {
+      width = Math.round(clipBox.width * this.scaleFactor);
+      height = Math.round(clipBox.height * this.scaleFactor);
+    } else if (usedSelector) {
+      const box = await this.page.$(opts.selector!).then(async (el: any) => el?.boundingBox());
       if (box) {
         width = Math.round(box.width * this.scaleFactor);
         height = Math.round(box.height * this.scaleFactor);
+      } else {
+        width = this.viewport.width * this.scaleFactor;
+        height = this.viewport.height * this.scaleFactor;
       }
     } else {
       width = this.viewport.width * this.scaleFactor;

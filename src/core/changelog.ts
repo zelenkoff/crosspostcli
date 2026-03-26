@@ -139,6 +139,54 @@ export async function getDiffForRange(options: {
   }
 }
 
+/**
+ * Returns the diff filtered to UI-relevant files only (JSX/TSX/CSS/Vue/Svelte).
+ * Strips test files, generated files, and type-only changes.
+ * Used by the screenshot planning AI to find real selectors and routes.
+ */
+export async function getUiDiff(options: {
+  commits?: string;
+  since?: string;
+  tag?: string;
+}): Promise<string> {
+  const range = options.tag
+    ? `${options.tag}..HEAD`
+    : options.commits ?? "HEAD~1..HEAD";
+
+  // UI file extensions to include
+  const UI_PATTERNS = [
+    "*.tsx", "*.jsx", "*.vue", "*.svelte",
+    "*.css", "*.scss", "*.sass", "*.less",
+    "*.html",
+  ];
+
+  const args = ["diff", "-p", "--unified=2", range, "--", ...UI_PATTERNS];
+
+  try {
+    const raw = await runGit(args);
+    if (!raw.trim()) return "";
+
+    // Filter out test files and generated files from the diff output
+    const lines = raw.split("\n");
+    const kept: string[] = [];
+    let skip = false;
+
+    for (const line of lines) {
+      if (line.startsWith("diff --git")) {
+        // Skip test files, stories, generated files
+        skip = /\.(test|spec|stories)\.|__generated__|\.d\.ts/.test(line);
+      }
+      if (!skip) kept.push(line);
+    }
+
+    const filtered = kept.join("\n");
+    // Budget: 15000 chars — enough for multi-file component diffs with full selector context
+    return filtered.slice(0, 15000);
+  } catch {
+    return "";
+  }
+}
+
 export async function getProjectName(): Promise<string> {
   try {
     const remote = await runGit(["remote", "get-url", "origin"]);

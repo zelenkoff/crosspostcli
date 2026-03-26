@@ -9,8 +9,11 @@ export class MastodonAdapter implements Adapter {
   supportsImages = true;
   supportsHtml = false;
   supportsMarkdown = false;
+  language: string | undefined;
 
-  constructor(private config: MastodonConfig) {}
+  constructor(private config: MastodonConfig) {
+    this.language = config.language;
+  }
 
   private get baseUrl(): string {
     const url = this.config.instance_url ?? "https://mastodon.social";

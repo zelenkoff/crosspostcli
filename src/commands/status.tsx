@@ -43,47 +43,74 @@ function StatusUI() {
       }
 
       const config = loadConfig();
+      const adapters = createAdapters(config);
 
-      // Initialize all platforms
-      const initial: PlatformInfo[] = PLATFORM_NAMES.map((p) => {
-        const platConfig = config.platforms[p as keyof typeof config.platforms];
-        const enabled = platConfig && "enabled" in platConfig && platConfig.enabled;
-        return {
-          key: p,
-          name: PLATFORM_DISPLAY[p] ?? p,
-          status: enabled ? ("validating" as StatusState) : ("skipped" as StatusState),
-          detail: enabled ? "checking..." : "not configured",
-        };
-      });
+      // Build initial list: one row per adapter key, plus unconfigured platforms
+      const adapterKeys = new Set(adapters.keys());
+      const configuredBasePlatforms = new Set(
+        [...adapterKeys].map((k) => k.split(":")[0])
+      );
+
+      const initial: PlatformInfo[] = [];
+      // Add adapter rows
+      for (const [key, adapter] of adapters) {
+        const baseName = PLATFORM_DISPLAY[key.split(":")[0]] ?? key;
+        const lang = adapter.language;
+        const displayName = lang ? `${baseName} [${lang}]` : baseName;
+        initial.push({ key, name: displayName, status: "validating", detail: "checking..." });
+      }
+      // Add not-configured platforms
+      for (const p of PLATFORM_NAMES) {
+        if (!configuredBasePlatforms.has(p)) {
+          initial.push({ key: p, name: PLATFORM_DISPLAY[p] ?? p, status: "skipped", detail: "not configured" });
+        }
+      }
       setPlatforms(initial);
 
-      // Validate enabled platforms
-      const adapters = createAdapters(config);
-      await validateAll(adapters, (name, valid) => {
-        setPlatforms((prev) =>
-          prev.map((p) => {
-            if (p.name === name) {
-              // Build detail string
-              let detail = valid ? "connected" : "authentication failed";
-              if (valid && p.key === "telegram") {
-                const channels = config.platforms.telegram.channels;
-                if (channels.length > 0) {
-                  detail = `${channels.length} channel${channels.length > 1 ? "s" : ""} (${channels.map((c) => c.id).join(", ")})`;
-                }
-              }
-              if (valid && p.key === "bluesky") {
-                detail = config.platforms.bluesky.handle ?? "connected";
-              }
-              if (valid && p.key === "discord") {
-                const hooks = config.platforms.discord.webhooks;
-                detail = `${hooks.length} webhook${hooks.length > 1 ? "s" : ""}`;
-              }
-              return { ...p, status: valid ? "success" : "error", detail };
-            }
-            return p;
-          }),
-        );
-      });
+      const results = await validateAll(adapters);
+      setPlatforms((prev) =>
+        prev.map((p) => {
+          const adapter = adapters.get(p.key);
+          if (!adapter) return p;
+          const valid = results.get(p.key) ?? false;
+
+          let detail = valid ? "connected" : "authentication failed";
+          const baseKey = p.key.split(":")[0];
+
+          if (valid && baseKey === "telegram") {
+            const tAdapter = adapter as import("../adapters/telegram.js").TelegramAdapter;
+            const ch = (tAdapter as any).config?.channels as Array<{ id: string; language?: string }> | undefined;
+            if (ch && ch.length > 0) detail = ch.map((c) => c.id).join(", ");
+          }
+          if (valid && baseKey === "bluesky") {
+            const lang = config.platforms.bluesky.language;
+            detail = (config.platforms.bluesky.handle ?? "connected") + (lang ? ` [${lang}]` : "");
+          }
+          if (valid && baseKey === "discord") {
+            const dAdapter = adapter as any;
+            const hooks = dAdapter.config?.webhooks as Array<{ url: string; label?: string }> | undefined;
+            if (hooks) detail = hooks.map((h) => h.label ?? h.url.slice(0, 30) + "…").join(", ");
+          }
+          if (valid && baseKey === "x") {
+            const lang = config.platforms.x.language;
+            detail = "connected" + (lang ? ` [${lang}]` : "");
+          }
+          if (valid && baseKey === "mastodon") {
+            const lang = config.platforms.mastodon.language;
+            detail = (config.platforms.mastodon.instance_url ?? "connected") + (lang ? ` [${lang}]` : "");
+          }
+          if (valid && baseKey === "medium") {
+            const lang = config.platforms.medium.language;
+            detail = `${config.platforms.medium.publish_status} draft` + (lang ? ` [${lang}]` : "");
+          }
+          if (valid && baseKey === "blog") {
+            const lang = config.platforms.blog.language;
+            const dir = config.platforms.blog.content_dir ?? "not set";
+            detail = dir + (lang ? ` [${lang}]` : "");
+          }
+          return { ...p, status: valid ? "success" : "error", detail };
+        }),
+      );
 
       setDone(true);
     }

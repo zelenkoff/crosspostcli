@@ -8,8 +8,13 @@ export class TelegramAdapter implements Adapter {
   supportsImages = true;
   supportsHtml = true;
   supportsMarkdown = false;
+  language: string | undefined;
 
-  constructor(private config: TelegramConfig) {}
+  constructor(private config: TelegramConfig) {
+    // If all channels share the same language, expose it for AI generation routing
+    const langs = [...new Set(config.channels.map((c) => c.language).filter(Boolean))];
+    this.language = langs.length === 1 ? langs[0] : undefined;
+  }
 
   formatText(text: string): string {
     return text.slice(0, this.maxTextLength);

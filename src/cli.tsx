@@ -180,6 +180,7 @@ program
   .option("--auth-login-submit <selector>", "Login submit button selector (default: button[type=submit])")
   .option("--headed", "Run browser in headed mode (visible window) for debugging")
   .option("--slow-mo <ms>", "Slow down browser actions by ms (default: 800 when --headed)", parseInt)
+  .option("--lang <code>", "Language code for this post (e.g. ru, en, es) — routes to matching channels and writes content in that language")
   .option("--system-prompt <prompt>", "Custom system prompt for AI content generation")
   .option("--system-prompt-file <path>", "Read system prompt from a file")
   .action(async (description, opts) => {

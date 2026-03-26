@@ -10,11 +10,14 @@ export class BlogGitAdapter implements Adapter {
   supportsImages = true;
   supportsHtml = false;
   supportsMarkdown = true;
+  language: string | undefined;
 
   constructor(
     private config: BlogConfig,
     private options?: { slug?: string; title?: string; tags?: string[] },
-  ) {}
+  ) {
+    this.language = config.language;
+  }
 
   formatText(text: string): string {
     return text;

@@ -10,6 +10,8 @@ import type { Changelog, CommitInfo } from "./changelog.js";
 export interface DiscoveryOptions {
   url: string;
   changelog?: Changelog;
+  /** Plain text description — keywords are extracted automatically when no changelog/keywords given */
+  description?: string;
   keywords?: string[];
   maxPages?: number;
   delay?: number;
@@ -35,6 +37,34 @@ export interface DiscoveryResult {
   features: DiscoveredFeature[];
   pagesVisited: string[];
   overviewScreenshot: Buffer;
+}
+
+/**
+ * Extract meaningful keywords from a plain text description.
+ */
+export function extractKeywordsFromText(text: string): string[] {
+  const stopWords = new Set([
+    "add", "added", "update", "updated", "fix", "fixed", "remove", "removed",
+    "change", "changed", "implement", "use", "make", "the", "a", "an", "to",
+    "for", "in", "on", "of", "and", "or", "is", "it", "that", "this", "with",
+    "from", "by", "as", "be", "was", "we", "i", "you", "they", "can", "will",
+    "not", "but", "if", "at", "all", "new", "now", "find", "get", "see",
+    "page", "also", "more", "some", "our",
+  ]);
+
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !stopWords.has(w));
+
+  // Deduplicate and also produce 2-grams
+  const keywords = new Set<string>(words);
+  for (let i = 0; i < words.length - 1; i++) {
+    keywords.add(`${words[i]} ${words[i + 1]}`);
+  }
+
+  return Array.from(keywords);
 }
 
 /**
@@ -116,9 +146,12 @@ export async function discoverFeatures(options: DiscoveryOptions): Promise<Disco
   if (options.changelog) {
     keywords.push(...extractKeywords(options.changelog));
   }
+  if (keywords.length === 0 && options.description) {
+    keywords.push(...extractKeywordsFromText(options.description));
+  }
 
   if (keywords.length === 0) {
-    throw new Error("No keywords to search for. Provide --from-git or --discover-keywords.");
+    throw new Error("No keywords to search for. Provide a description, --from-git, or --discover-keywords.");
   }
 
   // Resolve device config

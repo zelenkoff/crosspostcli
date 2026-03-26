@@ -28,6 +28,8 @@ export interface ScreenshotInstruction {
   url: string;
   selector?: string;
   highlight?: string[];
+  /** CSS selectors to click (in order) after page load, before screenshotting — use for tabs, accordions, dropdowns */
+  clicks?: string[];
   description: string;
 }
 
@@ -63,7 +65,12 @@ export interface AgentLoopOptions {
   appUrl: string;
   adapters: Map<string, Adapter>;
   verbosity?: Verbosity;
+  /** General diff for analysis/compose context (truncated) */
   diff?: string;
+  /** UI-only diff for screenshot planning (JSX/TSX/CSS only, larger budget) */
+  uiDiff?: string;
+  /** Language code for generated content (e.g. "ru", "en") — AI writes in this language */
+  language?: string;
   /** Base screenshot options (device, dark mode, hide selectors, delay) */
   screenshotDefaults?: Partial<ScreenshotOptions>;
   /** Authentication options for accessing protected apps */
@@ -120,6 +127,7 @@ function buildAnalysisPrompt(
   diff?: string,
   systemPrompt?: string,
   revisionFeedback?: string,
+  uiDiff?: string,
 ): { system: string; user: string } {
   const system = resolveSystemPrompt(DEFAULT_ANALYSIS_SYSTEM_PROMPT, undefined, systemPrompt);
 
@@ -147,8 +155,10 @@ function buildAnalysisPrompt(
     parts.push(`Summary: ${ctx.changelog.summary}`);
   }
 
-  if (diff) {
-    parts.push(`\n## Code Diff (abbreviated)\n${diff.slice(0, 3000)}`);
+  // Prefer uiDiff (UI files only) over generic diff for analysis context
+  const analysisDiff = uiDiff || diff;
+  if (analysisDiff) {
+    parts.push(`\n## UI Code Diff\nChanged UI files — scan for route paths, component names, CSS classes and IDs.\n${analysisDiff.slice(0, 5000)}`);
   }
 
   if (revisionFeedback) {
@@ -159,12 +169,27 @@ function buildAnalysisPrompt(
   }
 
   parts.push(`\n## Instructions`);
-  parts.push(`Analyze these changes and create a content plan. Think about:`);
-  parts.push(`- What are the key changes in plain language? What would a user notice?`);
-  parts.push(`- What's the best narrative angle for the announcement?`);
-  parts.push(`- Who is the target audience? What do they care about?`);
-  parts.push(`- What UI elements in the app at ${appUrl} would best illustrate these changes?`);
-  parts.push(`- What tone fits this type of update?`);
+  parts.push(`Analyze these changes and create a content plan. Think like a user, not an engineer:\n`);
+  parts.push(`1. KEY CHANGES (user perspective):`);
+  parts.push(`   - What would a non-technical user NOTICE when using this app?`);
+  parts.push(`   - Focus ONLY on visible UI/UX changes. Ignore refactors, dependency updates, architecture changes.`);
+  parts.push(`   - Express each change as "Before, users had to X. Now, they can Y."`);
+  parts.push(`   - Example good: "Search results now appear instantly as you type."`);
+  parts.push(`   - Example bad: "Refactored the search API endpoint for performance."`);
+  parts.push(`\n2. NARRATIVE ANGLE (the story):`);
+  parts.push(`   - What is the ONE core idea that ties these changes together?`);
+  parts.push(`   - Write it as a short story: "This update is about X. It solves the problem of Y for users who Z."`);
+  parts.push(`   - Make it something a non-developer would find exciting or valuable.`);
+  parts.push(`   - Example good: "Search just got instant — no more waiting, results appear as you type."`);
+  parts.push(`   - Example bad: "Refactored the search API endpoint and added webhook integration."`);
+  parts.push(`\n3. TARGET AUDIENCE:`);
+  parts.push(`   - Who benefits most? (e.g., "Users who search frequently", not "developers using the REST API")`);
+  parts.push(`   - What do they care about? (Speed? Ease of use? New capabilities?)`);
+  parts.push(`\n4. SCREENSHOT STRATEGY:`);
+  parts.push(`   - List 2-4 UI screens or elements that SHOW the narrative angle in action.`);
+  parts.push(`   - Be specific: not "The settings page" but "The settings page showing the new dark mode toggle with the app in dark mode."`);
+  parts.push(`\n5. SUGGESTED TONE:`);
+  parts.push(`   - Does this update warrant excitement, professionalism, or something else?`);
 
   parts.push(`\n## Output Format`);
   parts.push(`Return ONLY valid JSON, no markdown fences:`);
@@ -185,6 +210,7 @@ function buildPlanPrompt(
   diff?: string,
   contentPlan?: ContentPlan,
   systemPrompt?: string,
+  uiDiff?: string,
 ): { system: string; user: string } {
   const system = resolveSystemPrompt(DEFAULT_PLAN_SYSTEM_PROMPT, undefined, systemPrompt);
 
@@ -221,27 +247,46 @@ function buildPlanPrompt(
     parts.push(`Summary: ${ctx.changelog.summary}`);
   }
 
-  if (diff) {
-    parts.push(`\n## Code Diff (abbreviated)\n${diff.slice(0, 3000)}`);
+  // Prefer uiDiff (UI-only, larger budget) over generic diff for planning
+  const planDiff = uiDiff || diff;
+  if (planDiff) {
+    parts.push(`\n## UI Code Diff\nThis is the actual changed UI code. Read it carefully to find real routes, element IDs, and CSS selectors.\n${planDiff}`);
   }
 
   parts.push(`\n## Instructions`);
-  parts.push(`Based on the code diff and changes above, decide which pages/sections of the app at ${appUrl} would make the best screenshots.`);
-  parts.push(`\nIMPORTANT — derive URLs and selectors from the actual code:`);
-  parts.push(`- Look at the diff for route definitions, page components, or URL paths (e.g. "/settings", "/dashboard")`);
-  parts.push(`- Look at the diff for CSS class names, component names, or DOM element IDs that were added or changed`);
-  parts.push(`- Only use selectors that you can see EXIST in the diff (added/modified code)`);
-  parts.push(`- If you cannot find a specific selector in the diff, omit "selector" and capture the full page`);
-  parts.push(`- Prefer full-page screenshots over element selectors when uncertain`);
-  parts.push(`\nReturn 1-3 screenshot instructions. Each should have:`);
-  parts.push(`- "url": The full URL to navigate to — derive from actual routes in the diff, not guesses`);
-  parts.push(`- "selector": ONLY if you found this CSS selector in the diff. Omit entirely if not found in code.`);
-  parts.push(`- "highlight": Optional array of CSS selectors to highlight with a red outline (only if found in diff)`);
-  parts.push(`- "description": What this screenshot shows and why it matters`);
+  parts.push(`Your job: read the UI diff above and produce screenshot instructions that target the ACTUAL changed UI elements.\n`);
+  parts.push(`STEP 1 — Extract from the diff:`);
+  parts.push(`- Which routes/pages were changed? (look for route files, page components, href values)`);
+  parts.push(`- What new elements were added? (look for id="...", className="...", data-testid="...")`);
+  parts.push(`- What existing elements were modified? (changed class names, new props, structural changes)`);
+  parts.push(`\nSTEP 2 — Pick 1-4 screenshots based on what you found:`);
+  parts.push(`- Use the ACTUAL page URL where the changed component renders`);
+  parts.push(`- Use REAL id/class selectors from the diff code — not guesses`);
+  parts.push(`- If a component has id="rec-enabled" in the diff → use "#rec-enabled" as selector`);
+  parts.push(`- If a route file is at app/products/page.tsx → URL is likely ${appUrl}/products`);
+  parts.push(`\nSTEP 3 — Choose capture mode based on the change:`);
+  parts.push(`- New section/panel added → use "selector" on the container to zoom in on just that section`);
+  parts.push(`- Changed element in existing page → use "highlight" to mark it in context`);
+  parts.push(`- Entirely new page/route → omit selector/highlight for full viewport`);
+  parts.push(`- Feature is inside a tab/accordion/dropdown → use "clicks" to activate it before screenshotting`);
+  parts.push(`\nSTEP 4 — If the feature is inside a tab, drawer, or collapsible:`);
+  parts.push(`- Add a "clicks" array with the CSS selectors to click (in order) to reveal the content`);
+  parts.push(`- Example: to show the Recommendations tab → "clicks": ["[role='tab']:has-text('Recommendations')", "button[data-tab='recommendations']"]`);
+  parts.push(`- Example: to open an accordion → "clicks": ["button.accordion-trigger[data-value='shipping']"]`);
+  parts.push(`- Try multiple selector variants — only the first one that exists will execute`);
+  parts.push(`\nDescriptions must be SPECIFIC — the compose AI uses them to write matching text:`);
+  parts.push(`- Bad: "The settings page"`);
+  parts.push(`- Good: "The storefront settings page showing the new Recommendations card with enable/disable toggle and display location switches"`);
+  parts.push(`\nReturn 1-4 screenshot instructions. Each must have:`);
+  parts.push(`- "url": Full URL to navigate to`);
+  parts.push(`- "clicks": Array of CSS selectors to click before screenshotting (omit if nothing to activate)`);
+  parts.push(`- "selector": CSS selector from the actual diff code (omit for full viewport)`);
+  parts.push(`- "highlight": Array of CSS selectors to highlight (omit if using selector zoom)`);
+  parts.push(`- "description": What this screenshot shows and why it matters to the user`);
 
   parts.push(`\n## Output Format`);
   parts.push(`Return ONLY valid JSON, no markdown fences:`);
-  parts.push(`{"reasoning": "why these screenshots and which part of the diff informed each URL/selector", "screenshots": [{"url": "...", "selector": "...", "highlight": ["..."], "description": "..."}]}`);
+  parts.push(`{"reasoning": "why these screenshots", "screenshots": [{"url": "...", "clicks": ["..."], "selector": "...", "highlight": ["..."], "description": "..."}]}`);
 
   return { system, user: parts.join("\n") };
 }
@@ -254,6 +299,8 @@ function buildComposePrompt(
   diff?: string,
   contentPlan?: ContentPlan,
   systemPrompt?: string,
+  language?: string,
+  perPlatformLanguage?: Record<string, string>,
 ): { system: string; userContent: Array<{ type: "text"; text: string } | { type: "image"; source: { type: "base64"; media_type: string; data: string } }> } {
   const system = resolveSystemPrompt(DEFAULT_COMPOSE_SYSTEM_PROMPT, undefined, systemPrompt);
 
@@ -261,7 +308,10 @@ function buildComposePrompt(
 
   // Text context
   const textParts: string[] = [];
-  textParts.push("Write social media posts for the following software update. You have screenshots of the actual app.\n");
+  const languageInstruction = language
+    ? ` Write ALL post content in ${language} language (ISO 639-1 code: "${language}"). Do not write in any other language.`
+    : "";
+  textParts.push(`Write social media posts for the following software update. You have screenshots of the actual app.${languageInstruction}\n`);
 
   textParts.push(`## Project`);
   textParts.push(`Name: ${ctx.projectName}`);
@@ -334,17 +384,39 @@ function buildComposePrompt(
   platformParts.push(`For Telegram: pick 1 main screenshot that best represents the update.`);
   platformParts.push(`For long-form platforms (Medium, Blog): pick multiple screenshots to place contextually within the article.`);
 
-  platformParts.push(`\n## Inline Image References (Blog/Medium)`);
-  platformParts.push(`For blog and medium posts, embed screenshots INLINE in the markdown text using relative paths.`);
-  platformParts.push(`Use this exact format: ![descriptive alt text](./image-N.png) where N is the 0-based screenshot index.`);
-  platformParts.push(`Place each image right after the paragraph that describes what it shows.`);
-  platformParts.push(`CRITICAL: The ONLY valid image URLs are ./image-0.png, ./image-1.png, ./image-2.png, etc. — one per captured screenshot.`);
-  platformParts.push(`NEVER invent, guess, or fabricate image URLs. Do NOT use https:// links to images. Do NOT make up paths like /images/feature.png.`);
-  platformParts.push(`The screenshots you see attached to this message ARE the images. Reference them by index: ./image-0.png for screenshot 0, ./image-1.png for screenshot 1, etc.`);
+  platformParts.push(`\n## Screenshot-to-Paragraph Mapping (Blog/Medium Only)`);
+  platformParts.push(`You have ${screenshots.length} screenshot(s), indexed 0 through ${screenshots.length - 1}.`);
+  platformParts.push(`Match each screenshot to the paragraph it illustrates:`);
+  screenshots.forEach((s, i) => {
+    platformParts.push(`  ./image-${i}.png — ${s.instruction.description}`);
+  });
+  platformParts.push(`\nFor blog and medium posts, embed screenshots INLINE as you write:`);
+  platformParts.push(`1. Write a paragraph about a user-facing change.`);
+  platformParts.push(`2. Ask: which screenshot above shows what I just described?`);
+  platformParts.push(`3. If there's a match, embed it immediately after: ![brief description of what users see](./image-N.png)`);
+  platformParts.push(`4. If no screenshot matches, do NOT force an image — just move on.`);
+  platformParts.push(`5. Distribute images throughout — never pile them all at the top or bottom.`);
+  platformParts.push(`\nCRITICAL — image path rules:`);
+  platformParts.push(`- ONLY valid paths: ./image-0.png through ./image-${screenshots.length - 1}.png`);
+  platformParts.push(`- NEVER invent URLs: no https://, no /images/feature.png, no made-up paths.`);
+  platformParts.push(`- NEVER reference an index beyond ${screenshots.length - 1}.`);
 
-  platformParts.push(`\n## Title Requirement`);
-  platformParts.push(`For long-form platforms (blog, medium): include a "title" field with a compelling, context-appropriate article title.`);
-  platformParts.push(`The title should reflect the actual content — not be generic. Keep it under 100 characters.`);
+  // Per-platform language overrides (when platforms have different configured languages)
+  if (perPlatformLanguage && Object.keys(perPlatformLanguage).length > 0 && !language) {
+    platformParts.push(`\n## Per-Platform Language`);
+    platformParts.push(`Write each platform's post in its specified language:`);
+    for (const [key, lang] of Object.entries(perPlatformLanguage)) {
+      platformParts.push(`- ${key}: write in ${lang} language (ISO 639-1: "${lang}")`);
+    }
+  }
+
+  platformParts.push(`\n## Title Requirement (Blog/Medium Only)`);
+  platformParts.push(`The title must:`);
+  platformParts.push(`1. Reflect the narrative angle — if the story is about speed, the title is about speed.`);
+  platformParts.push(`2. Lead with USER BENEFIT, not feature names.`);
+  platformParts.push(`   Bad: "New Search API Improvements". Good: "Search Results Now Appear Instantly".`);
+  platformParts.push(`3. Be specific to THIS update — not "Product Updates" or "New Features Released".`);
+  platformParts.push(`4. Keep under 100 characters.`);
 
   const keys = platforms.map((p) => {
     const isLongForm = p.key === "blog" || p.key === "medium";
@@ -471,6 +543,7 @@ function parsePlanResponse(raw: string): ScreenshotPlan | null {
         url: s.url,
         selector: typeof s.selector === "string" ? s.selector : undefined,
         highlight: Array.isArray(s.highlight) ? s.highlight.filter((h: unknown) => typeof h === "string") : undefined,
+        clicks: Array.isArray(s.clicks) ? s.clicks.filter((c: unknown) => typeof c === "string") : undefined,
         description: s.description,
       });
     }
@@ -548,7 +621,7 @@ function parseAnalysisResponse(raw: string): ContentPlan | null {
 // ── Main Loop ──────────────────────────────────────────────────────────
 
 export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
-  const { aiOptions, context, appUrl, adapters, verbosity, diff, onStatus } = options;
+  const { aiOptions, context, appUrl, adapters, verbosity, diff, uiDiff, onStatus } = options;
   const maxScreenshots = options.maxScreenshots ?? 4;
 
   const emit = (phase: AgentPhase, detail: string) => {
@@ -567,7 +640,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       ? "AI is analyzing changes and creating a content plan..."
       : `AI is revising the content plan (revision ${revision})...`);
 
-    const analysisPrompt = buildAnalysisPrompt(context, appUrl, diff, options.systemPrompt, revisionFeedback);
+    const analysisPrompt = buildAnalysisPrompt(context, appUrl, diff, options.systemPrompt, revisionFeedback, uiDiff);
     let analysisRaw: string;
 
     if (aiOptions.provider === "openai") {
@@ -604,7 +677,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
   emit("planning", "AI is planning screenshots...");
 
-  const planPrompt = buildPlanPrompt(context, appUrl, diff, contentPlan ?? undefined, options.systemPrompt);
+  const planPrompt = buildPlanPrompt(context, appUrl, diff, contentPlan ?? undefined, options.systemPrompt, uiDiff);
   let planRaw: string;
 
   if (aiOptions.provider === "openai") {
@@ -642,6 +715,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
   const { BrowserSession } = await import("../screenshot/capture.js");
   const captured: CapturedScreenshot[] = [];
+  const captureErrors: string[] = [];
 
   const session = new BrowserSession({
     ...options.screenshotDefaults,
@@ -663,6 +737,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
             url: instruction.url,
             selector: instruction.selector,
             highlight: instruction.highlight,
+            clicks: instruction.clicks,
             hide: options.screenshotDefaults?.hide,
           }),
           new Promise<never>((_, reject) =>
@@ -677,7 +752,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         });
       } catch (err) {
         // Skip failed/timed-out screenshots but continue with others
-        emit("screenshotting", `Warning: Failed to capture screenshot ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        captureErrors.push(`[${i + 1}] ${instruction.url} — ${errMsg}`);
+        emit("screenshotting", `Warning: Failed to capture screenshot ${i + 1}: ${errMsg}`);
       }
     }
   } finally {
@@ -685,7 +762,10 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   }
 
   if (captured.length === 0) {
-    throw new Error("All screenshots failed to capture. Is the app running at " + appUrl + "?");
+    const errorDetail = captureErrors.length > 0
+      ? "\nErrors:\n" + captureErrors.join("\n")
+      : "";
+    throw new Error("All screenshots failed to capture. Is the app running at " + appUrl + "?" + errorDetail);
   }
 
   emit("screenshotting", `Captured ${captured.length} screenshot(s)`);
@@ -703,7 +783,18 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     supportsHtml: adapter.supportsHtml,
   }));
 
-  const composePrompt = buildComposePrompt(context, platforms, captured, verbosity, diff, contentPlan ?? undefined, options.systemPrompt);
+  const perPlatformLanguage: Record<string, string> = {};
+  if (!options.language) {
+    for (const [key, adapter] of adapters) {
+      if (adapter.language) perPlatformLanguage[key] = adapter.language;
+    }
+  }
+
+  const composePrompt = buildComposePrompt(
+    context, platforms, captured, verbosity, diff, contentPlan ?? undefined,
+    options.systemPrompt, options.language,
+    Object.keys(perPlatformLanguage).length > 0 ? perPlatformLanguage : undefined,
+  );
   let composeRaw: string;
 
   if (aiOptions.provider === "openai") {
@@ -758,6 +849,7 @@ export async function reviseAgentContent(options: {
   verbosity?: Verbosity;
   diff?: string;
   systemPrompt?: string;
+  language?: string;
 }): Promise<{ texts: Map<string, string>; titles: Map<string, string>; selectedScreenshots: Map<string, number[]> }> {
   const { aiOptions, context, adapters, agentResult, feedback, verbosity, diff, systemPrompt } = options;
 
@@ -770,9 +862,17 @@ export async function reviseAgentContent(options: {
     supportsHtml: adapter.supportsHtml,
   }));
 
+  const perPlatformLanguage: Record<string, string> = {};
+  if (!options.language) {
+    for (const [key, adapter] of adapters) {
+      if (adapter.language) perPlatformLanguage[key] = adapter.language;
+    }
+  }
+
   const composePrompt = buildComposePrompt(
     context, platforms, agentResult.screenshots, verbosity, diff,
-    agentResult.contentPlan ?? undefined, systemPrompt,
+    agentResult.contentPlan ?? undefined, systemPrompt, options.language,
+    Object.keys(perPlatformLanguage).length > 0 ? perPlatformLanguage : undefined,
   );
 
   // Append revision feedback to the last text content part

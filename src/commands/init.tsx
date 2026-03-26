@@ -117,9 +117,10 @@ function InitWizard() {
         platConfig.enabled = true;
 
         if (field.key === "_channels") {
-          // Telegram channels
+          // Telegram channels — upsert by ID to avoid duplicates on re-init
           const channels = (platConfig.channels as Array<{ id: string; language?: string }>) ?? [];
-          channels.push({ id: value });
+          const existing = channels.find((c) => c.id === value);
+          if (!existing) channels.push({ id: value });
           platConfig.channels = channels;
         } else if (field.key === "_channel_language") {
           // Set language on the last added Telegram channel
