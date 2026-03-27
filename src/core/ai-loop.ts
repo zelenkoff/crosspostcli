@@ -404,9 +404,9 @@ function buildComposePrompt(
   platformParts.push(`\n## Screenshot Selection`);
   platformParts.push(`For each platform, also pick which screenshot(s) to attach (by index, 0-based).`);
   platformParts.push(`Platforms that don't support images should get an empty array.`);
-  platformParts.push(`For short-form platforms (X, Bluesky, Mastodon): pick 1 most impactful screenshot.`);
-  platformParts.push(`For Telegram: pick 1 main screenshot that best represents the update.`);
-  platformParts.push(`For long-form platforms (Medium, Blog): pick multiple screenshots to place contextually within the article.`);
+  platformParts.push(`For X and Mastodon: pick up to 4 most relevant screenshots (single post, no threading).`);
+  platformParts.push(`For Telegram: pick ALL relevant screenshots — they are sent as an album so users see the full picture.`);
+  platformParts.push(`For long-form platforms (Blog, DEV.to): pick multiple screenshots to place contextually within the article.`);
 
   platformParts.push(`\n## Screenshot-to-Paragraph Mapping (Blog/Medium Only)`);
   platformParts.push(`You have ${screenshots.length} screenshot(s), indexed 0 through ${screenshots.length - 1}.`);
@@ -448,14 +448,21 @@ function buildComposePrompt(
     if (p.key === "bluesky") {
       return `"bluesky": {"thread": [{"text": "hook post...", "imageIndex": 0}, {"text": "feature 1...", "imageIndex": 1}], "screenshots": [0, 1]}`;
     }
+    if (p.key === "telegram") {
+      return `"telegram": {"text": "...", "screenshots": [0, 1, 2]}`;
+    }
     return isLongForm
       ? `"${p.key}": {"title": "...", "text": "...", "screenshots": [0, 1]}`
-      : `"${p.key}": {"text": "...", "screenshots": [0]}`;
+      : `"${p.key}": {"text": "...", "screenshots": [0, 1]}`;
   }).join(", ");
 
   platformParts.push(`\n## Output Format`);
   platformParts.push(`Return ONLY valid JSON, no markdown fences:`);
   platformParts.push(`{${keys}}`);
+
+  platformParts.push(`\n## Threading`);
+  platformParts.push(`X and Mastodon do NOT support threading — each is a single post with up to 4 images. Do not split content across multiple posts for these platforms.`);
+  platformParts.push(`Telegram does NOT support threading — use a single post with all screenshots as an album.`);
 
   if (hasBluesky) {
     platformParts.push(`\n## Bluesky Thread Format`);
