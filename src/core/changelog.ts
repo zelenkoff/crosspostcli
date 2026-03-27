@@ -187,6 +187,76 @@ export async function getUiDiff(options: {
   }
 }
 
+/**
+ * Rebuild a Changelog from a manually filtered list of commits.
+ * Used after the commit-selection step to scope the AI context.
+ */
+export function rebuildChangelog(commits: CommitInfo[]): Changelog {
+  const features = commits.filter((c) => c.type === "feat");
+  const fixes = commits.filter((c) => c.type === "fix");
+  const other = commits.filter((c) => c.type !== "feat" && c.type !== "fix");
+  return {
+    commits,
+    features,
+    fixes,
+    other,
+    range: `${commits.length} selected commit${commits.length !== 1 ? "s" : ""}`,
+    summary: summarizeChangelog(features.length, fixes.length, other.length),
+  };
+}
+
+/**
+ * Returns a diff scoped to a specific set of commit hashes.
+ * Diffs from just before the oldest hash to the newest.
+ */
+export async function getDiffForHashes(hashes: string[]): Promise<string> {
+  if (hashes.length === 0) return "";
+  try {
+    // hashes are newest-first (git log order), so last = oldest
+    const oldest = hashes[hashes.length - 1];
+    const newest = hashes[0];
+    const range = hashes.length === 1 ? `${oldest}^..${oldest}` : `${oldest}^..${newest}`;
+    const output = await runGit(["diff", "--stat", "-p", range]);
+    return output.slice(0, 3000);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Returns the UI-only diff scoped to a specific set of commit hashes.
+ */
+export async function getUiDiffForHashes(hashes: string[]): Promise<string> {
+  if (hashes.length === 0) return "";
+  const oldest = hashes[hashes.length - 1];
+  const newest = hashes[0];
+  const range = hashes.length === 1 ? `${oldest}^..${oldest}` : `${oldest}^..${newest}`;
+
+  const UI_PATTERNS = [
+    "*.tsx", "*.jsx", "*.vue", "*.svelte",
+    "*.css", "*.scss", "*.sass", "*.less",
+    "*.html",
+  ];
+
+  try {
+    const raw = await runGit(["diff", "-p", "--unified=2", range, "--", ...UI_PATTERNS]);
+    if (!raw.trim()) return "";
+
+    const lines = raw.split("\n");
+    const kept: string[] = [];
+    let skip = false;
+    for (const line of lines) {
+      if (line.startsWith("diff --git")) {
+        skip = /\.(test|spec|stories)\.|__generated__|\.d\.ts/.test(line);
+      }
+      if (!skip) kept.push(line);
+    }
+    return kept.join("\n").slice(0, 15000);
+  } catch {
+    return "";
+  }
+}
+
 export async function getProjectName(): Promise<string> {
   try {
     const remote = await runGit(["remote", "get-url", "origin"]);

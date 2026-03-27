@@ -4,7 +4,7 @@ import Spinner from "ink-spinner";
 import { loadConfig } from "../config/store.js";
 import { createAdapters, filterAdapters, postToAll, type PostOptions } from "../core/engine.js";
 import type { PostResult } from "../adapters/types.js";
-import { getCommitRange, getProjectName, type Changelog } from "../core/changelog.js";
+import { getCommitRange, getProjectName, rebuildChangelog, getDiffForHashes, getUiDiffForHashes, type Changelog, type CommitInfo } from "../core/changelog.js";
 import {
   generateAllPlatforms,
   generateForPlatform,
@@ -15,6 +15,7 @@ import {
   type Verbosity,
 } from "../core/announce-templates.js";
 import { PostSummary } from "../ui/PostSummary.js";
+import { CommitSelector } from "../ui/CommitSelector.js";
 import { ErrorBox } from "../ui/ErrorBox.js";
 import { StepIndicator } from "../ui/StepIndicator.js";
 import { PlatformStatusLine, type StatusState } from "../ui/PlatformStatus.js";
@@ -81,7 +82,7 @@ export interface AnnounceCommandOptions {
   lang?: string;
 }
 
-type Phase = "gather" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "content-revise" | "revising" | "posting" | "done" | "error";
+type Phase = "gather" | "commit-select" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "content-revise" | "revising" | "posting" | "done" | "error";
 
 interface PlatformState {
   key: string;
@@ -116,6 +117,13 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const planResolverRef = React.useRef<((result: { action: "continue" | "revise" | "abort"; feedback?: string }) => void) | null>(null);
   // Guard: prevent the agent-loop useEffect from re-running while the loop is already in progress
   const agentLoopRunningRef = React.useRef(false);
+  // Commit selection state
+  const [pendingChangelog, setPendingChangelog] = useState<Changelog | null>(null);
+  const commitSelectResolverRef = React.useRef<((commits: CommitInfo[]) => void) | null>(null);
+  // Selected commit hashes — set after commit-select, used to scope diffs
+  const [selectedHashes, setSelectedHashes] = useState<string[] | null>(null);
+  // Guard: prevent gather useEffect from re-running after commit-select resolver fires
+  const gatherDoneRef = React.useRef(false);
 
   const { isRawModeSupported } = useStdin();
   const rawModeOk = isRawModeSupported === true;
@@ -272,6 +280,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   // Phase: Gather
   useEffect(() => {
     if (phase !== "gather") return;
+    if (gatherDoneRef.current) return; // already completed; this re-render was triggered by commit-select returning
+    gatherDoneRef.current = true;
     (async () => {
       try {
         let log: Changelog | undefined;
@@ -291,6 +301,18 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
               since: options.since,
               tag: options.tag,
             });
+
+            // If more than one commit and not skipping confirms, let user filter
+            if (log.commits.length > 1 && !options.noConfirm) {
+              setPendingChangelog(log);
+              setPhase("commit-select");
+              const selectedCommits = await new Promise<CommitInfo[]>((resolve) => {
+                commitSelectResolverRef.current = resolve;
+              });
+              log = rebuildChangelog(selectedCommits);
+              setSelectedHashes(selectedCommits.map((c) => c.hash));
+            }
+
             setChangelog(log);
           } catch (err) {
             setError(`Git error: ${err instanceof Error ? err.message : String(err)}`);
@@ -454,10 +476,15 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           return;
         }
 
-        const [diff, uiDiff] = await Promise.all([
-          getDiffForRange({ commits: options.commits, since: options.since, tag: options.tag }).catch(() => null),
-          getUiDiff({ commits: options.commits, since: options.since, tag: options.tag }).catch(() => null),
-        ]);
+        const [diff, uiDiff] = selectedHashes
+          ? await Promise.all([
+              getDiffForHashes(selectedHashes).catch(() => null),
+              getUiDiffForHashes(selectedHashes).catch(() => null),
+            ])
+          : await Promise.all([
+              getDiffForRange({ commits: options.commits, since: options.since, tag: options.tag }).catch(() => null),
+              getUiDiff({ commits: options.commits, since: options.since, tag: options.tag }).catch(() => null),
+            ]);
 
         const result = await runAgentLoop({
           aiOptions: aiOpts,
@@ -596,11 +623,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
         }
 
         const verbosity = (options.verbosity as Verbosity) ?? undefined;
-        const diff = await getDiffForRange({
-          commits: options.commits,
-          since: options.since,
-          tag: options.tag,
-        });
+        const diff = selectedHashes
+          ? await getDiffForHashes(selectedHashes)
+          : await getDiffForRange({ commits: options.commits, since: options.since, tag: options.tag });
 
         const texts = await generateWithAi(context, adapters, aiOpts, verbosity, diff || undefined, options.systemPrompt, undefined, options.lang);
         setGeneratedTexts(texts);
@@ -766,6 +791,27 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   // Render based on phase
   if (phase === "error" && error) {
     return <ErrorBox message={error} suggestion={errorSuggestion} />;
+  }
+
+  if (phase === "commit-select" && pendingChangelog) {
+    return (
+      <CommitSelector
+        commits={pendingChangelog.commits}
+        onConfirm={(selected) => {
+          const resolver = commitSelectResolverRef.current;
+          if (resolver) {
+            commitSelectResolverRef.current = null;
+            resolver(selected);
+            // The gather useEffect is still running (blocked at the await).
+            // Resolving unblocks it; set phase to gather so the spinner shows
+            // while context is built. The effect won't re-run from scratch
+            // because it's already in-flight.
+            setPhase("gather");
+          }
+        }}
+        onAbort={() => process.exit(0)}
+      />
+    );
   }
 
   if (phase === "gather") {
