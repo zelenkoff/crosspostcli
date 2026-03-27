@@ -64,8 +64,10 @@ export class DevToAdapter implements Adapter {
       throw new Error(`Image upload failed (${res.status})`);
     }
 
-    const data = (await res.json()) as { image_of: { url: string } };
-    return data.image_of.url;
+    const data = (await res.json()) as { image_of?: { url?: string }; url?: string };
+    const url = data.image_of?.url ?? data.url;
+    if (!url) throw new Error("Image upload succeeded but response contained no URL");
+    return url;
   }
 
   async post(content: PostContent): Promise<PostResult[]> {

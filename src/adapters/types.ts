@@ -36,6 +36,8 @@ export interface PlatformConfig {
 export interface Adapter {
   name: string;
   validate(): Promise<boolean>;
+  /** Validate credentials and throw a descriptive error if invalid. */
+  validateOrThrow?(): Promise<void>;
   post(content: PostContent): Promise<PostResult[]>;
   maxTextLength: number;
   supportsImages: boolean;

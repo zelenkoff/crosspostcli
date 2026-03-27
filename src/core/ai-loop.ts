@@ -351,10 +351,12 @@ function buildComposePrompt(
   }
 
   if (contentPlan) {
-    textParts.push(`\n## Content Plan (from analysis phase)`);
-    textParts.push(`Key changes: ${contentPlan.keyChanges.join("; ")}`);
-    textParts.push(`Narrative angle: ${contentPlan.narrativeAngle}`);
+    textParts.push(`\n## Content Plan (FOLLOW THIS)`);
+    textParts.push(`You MUST follow this content plan. It was approved by the user.`);
+    textParts.push(`Key changes to cover: ${contentPlan.keyChanges.join("; ")}`);
+    textParts.push(`Narrative angle to use: ${contentPlan.narrativeAngle}`);
     textParts.push(`Target audience: ${contentPlan.targetAudience}`);
+    textParts.push(`Do not introduce angles, features, or stories not listed in the key changes above.`);
   }
 
   textParts.push(`\n## Tone\n${ctx.tone}`);
@@ -497,7 +499,7 @@ async function callAnthropicCompose(
   const client = new Anthropic({ apiKey: options.apiKey });
   const response = await client.messages.create({
     model: options.model ?? "claude-sonnet-4-20250514",
-    max_tokens: 4096,
+    max_tokens: 8192,
     system: prompt.system,
     messages: [{
       role: "user",
@@ -550,7 +552,7 @@ async function callOpenAICompose(
 
   const response = await client.chat.completions.create({
     model: options.model ?? "gpt-4o",
-    max_tokens: 4096,
+    max_tokens: 8192,
     messages: [
       { role: "system", content: prompt.system },
       { role: "user", content: contentParts },
@@ -776,7 +778,15 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   });
 
   try {
-    await session.init();
+    try {
+      await session.init();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const hint = msg.includes("Executable doesn't exist") || msg.includes("playwright")
+        ? "Playwright browser not found. Run: bunx playwright install chromium"
+        : msg;
+      throw new Error(`Failed to launch browser: ${hint}`);
+    }
 
     for (let i = 0; i < finalPlan.screenshots.length; i++) {
       const instruction = finalPlan.screenshots[i];

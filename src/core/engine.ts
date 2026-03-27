@@ -103,17 +103,25 @@ export function filterAdapters(
 ): Map<string, Adapter> {
   const filtered = new Map(adapters);
 
+  // Keys can be "telegram", "telegram:ru", "discord:en" etc.
+  // Match by exact key OR by base platform name (part before ":").
+  const matchesAny = (key: string, names: Set<string>): boolean => {
+    if (names.has(key)) return true;
+    const base = key.split(":")[0];
+    return names.has(base);
+  };
+
   if (options.only && options.only.length > 0) {
     const allowed = new Set(options.only.map((p) => p.toLowerCase()));
     for (const key of filtered.keys()) {
-      if (!allowed.has(key)) filtered.delete(key);
+      if (!matchesAny(key, allowed)) filtered.delete(key);
     }
   }
 
   if (options.exclude && options.exclude.length > 0) {
     const excluded = new Set(options.exclude.map((p) => p.toLowerCase()));
     for (const key of filtered.keys()) {
-      if (excluded.has(key)) filtered.delete(key);
+      if (matchesAny(key, excluded)) filtered.delete(key);
     }
   }
 
