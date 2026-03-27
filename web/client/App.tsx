@@ -2,6 +2,7 @@ import React from "react";
 import { Route, Switch, Link, useLocation } from "wouter";
 import { StatusPage } from "./pages/StatusPage";
 import { AnnouncePage } from "./pages/AnnouncePage";
+import { PreviewPage } from "./pages/PreviewPage";
 import "./styles/global.css";
 
 export default function App() {
@@ -43,6 +44,7 @@ export default function App() {
       <Switch>
         <Route path="/" component={StatusPage} />
         <Route path="/announce" component={AnnouncePage} />
+        <Route path="/preview/:sessionId" component={PreviewPage} />
       </Switch>
     </div>
   );

@@ -17,7 +17,13 @@ export class MastodonAdapter implements Adapter {
 
   private get baseUrl(): string {
     const url = this.config.instance_url ?? "https://mastodon.social";
-    return url.replace(/\/+$/, "");
+    // Strip any path after the origin (e.g. user pasted their profile URL)
+    try {
+      const { origin } = new URL(url);
+      return origin;
+    } catch {
+      return url.replace(/\/+$/, "");
+    }
   }
 
   formatText(text: string): string {

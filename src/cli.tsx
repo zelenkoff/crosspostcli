@@ -160,6 +160,7 @@ program
   .option("--dry-run", "Preview without posting")
   .option("--json", "Output as JSON")
   .option("--no-confirm", "Skip interactive review (for CI/scripts)")
+  .option("--web", "Open the browser-based preview editor after generating content")
   .option("--blog-slug <slug>", "Blog post slug")
   .option("--blog-title <title>", "Blog post title")
   .option("--telegram <text>", "Custom text for Telegram")

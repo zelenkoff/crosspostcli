@@ -51,7 +51,43 @@ export class TelegramAdapter implements Adapter {
         const text = content.html ?? this.formatText(content.text);
         let res: Response;
 
-        if (content.images && content.images.length > 0) {
+        if (content.images && content.images.length > 1) {
+          // Multiple images — use sendMediaGroup (up to 10), caption on first item only
+          const images = content.images.slice(0, 10);
+          const form = new FormData();
+          form.append("chat_id", channel.id);
+          const media = images.map((img, i) => {
+            const attachName = `photo${i}`;
+            form.append(attachName, new Blob([img]), `${attachName}.jpg`);
+            const item: Record<string, unknown> = { type: "photo", media: `attach://${attachName}` };
+            if (i === 0) {
+              item.caption = text;
+              item.parse_mode = "HTML";
+            }
+            return item;
+          });
+          form.append("media", JSON.stringify(media));
+
+          res = await fetch(`https://api.telegram.org/bot${this.config.bot_token}/sendMediaGroup`, {
+            method: "POST",
+            body: form,
+          });
+
+          const data = (await res.json()) as { ok: boolean; result?: Array<{ message_id: number }>; description?: string };
+          if (!data.ok) {
+            throw new PlatformError(
+              this.name,
+              data.description ?? "Unknown Telegram error",
+              suggestForHttpError(res.status, this.name),
+              res.status,
+            );
+          }
+          const messageId = data.result?.[0]?.message_id;
+          const channelName = channel.id.replace("@", "");
+          const url = messageId ? `https://t.me/${channelName}/${messageId}` : undefined;
+          results.push({ platform: this.name, channel: channel.label ?? channel.id, success: true, url, durationMs: Date.now() - start });
+          continue;
+        } else if (content.images && content.images.length === 1) {
           const form = new FormData();
           form.append("chat_id", channel.id);
           form.append("caption", text);

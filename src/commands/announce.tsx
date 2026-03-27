@@ -80,6 +80,8 @@ export interface AnnounceCommandOptions {
   systemPrompt?: string;
   /** Language code for this post (e.g. ru, en, es) — routes to matching channels, AI writes in this language */
   lang?: string;
+  /** Open the browser-based preview editor instead of the terminal preview */
+  web?: boolean;
 }
 
 type Phase = "gather" | "commit-select" | "post-style-select" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "content-revise" | "revising" | "posting" | "done" | "error";
@@ -126,6 +128,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const gatherDoneRef = React.useRef(false);
   // Post style selection state
   const postStyleResolverRef = React.useRef<((style: PostStyle) => void) | null>(null);
+  // Web preview state: URL shown in terminal while browser is open
+  const [webPreviewUrl, setWebPreviewUrl] = useState<string | null>(null);
 
   const { isRawModeSupported } = useStdin();
   const rawModeOk = isRawModeSupported === true;
@@ -662,6 +666,22 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
     if (generatedTexts.size > 0) {
       if (options.noConfirm) {
         setPhase("posting");
+      } else if (options.web) {
+        // Open browser-based preview editor
+        (async () => {
+          try {
+            const { openWebPreview } = await import("../core/preview-server.js");
+            await openWebPreview({
+              texts: generatedTexts,
+              screenshots: agentLoopResult?.screenshots ?? [],
+              onOpen: (url) => setWebPreviewUrl(url),
+            });
+          } catch (err) {
+            // Web preview failed — fall through to terminal preview
+            setError(`Web preview failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          setPhase("done");
+        })();
       }
       return;
     }
@@ -681,9 +701,22 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
       const texts = generateAllPlatforms(context, adapters, verbosity);
       setGeneratedTexts(texts);
 
-      // Auto-proceed if --no-confirm
       if (options.noConfirm) {
         setPhase("posting");
+      } else if (options.web) {
+        (async () => {
+          try {
+            const { openWebPreview } = await import("../core/preview-server.js");
+            await openWebPreview({
+              texts,
+              screenshots: [],
+              onOpen: (url) => setWebPreviewUrl(url),
+            });
+          } catch (err) {
+            setError(`Web preview failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          setPhase("done");
+        })();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1022,6 +1055,30 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             <Text color="green"><Spinner type="dots" /></Text>
             {" "}Generating content with AI...
           </Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (phase === "preview" && options.web) {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <StepIndicator current={options.discover ? 4 : 3} total={options.discover ? 5 : 4} label="Browser preview" />
+        <Box marginTop={1} flexDirection="column">
+          {webPreviewUrl ? (
+            <>
+              <Text color="green">✓ Browser preview open</Text>
+              <Box marginLeft={2} marginTop={1} flexDirection="column">
+                <Text dimColor>{webPreviewUrl}</Text>
+                <Text dimColor>Edit and post from the browser, or close the tab to continue in the terminal.</Text>
+              </Box>
+            </>
+          ) : (
+            <Box>
+              <Text color="yellow"><Spinner type="dots" /></Text>
+              <Text> Starting web preview server...</Text>
+            </Box>
+          )}
         </Box>
       </Box>
     );

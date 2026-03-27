@@ -2,6 +2,14 @@ import type { Adapter, PostContent, PostResult } from "./types.js";
 import type { DevToConfig } from "../config/schema.js";
 import { PlatformError, suggestForHttpError } from "../utils/errors.js";
 
+// DEV.to has no public image upload API — strip local image references from markdown
+function stripLocalImageRefs(markdown: string): string {
+  return markdown
+    .replace(/!\[([^\]]*)\]\(\.\/[^)]+\)/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 const BASE_URL = "https://dev.to/api";
 
 export class DevToAdapter implements Adapter {
@@ -48,28 +56,6 @@ export class DevToAdapter implements Adapter {
     }
   }
 
-  /** Upload a single image buffer to DEV.to and return the hosted URL. */
-  private async uploadImage(imageBuffer: Buffer, index: number): Promise<string> {
-    const formData = new FormData();
-    const blob = new Blob([imageBuffer], { type: "image/png" });
-    formData.append("image", blob, `image-${index}.png`);
-
-    const res = await fetch(`${BASE_URL}/images`, {
-      method: "POST",
-      headers: { "api-key": this.config.api_key! },
-      body: formData,
-    });
-
-    if (!res.ok) {
-      throw new Error(`Image upload failed (${res.status})`);
-    }
-
-    const data = (await res.json()) as { image_of?: { url?: string }; url?: string };
-    const url = data.image_of?.url ?? data.url;
-    if (!url) throw new Error("Image upload succeeded but response contained no URL");
-    return url;
-  }
-
   async post(content: PostContent): Promise<PostResult[]> {
     if (content.language && this.config.language && content.language !== this.config.language) {
       return [];
@@ -77,20 +63,6 @@ export class DevToAdapter implements Adapter {
     const start = Date.now();
     try {
       const rawText = content.markdown ?? content.text;
-
-      // Upload images and build a URL map (./image-N.png → hosted URL)
-      const imageUrls: string[] = [];
-      if (content.images && content.images.length > 0) {
-        for (let i = 0; i < content.images.length; i++) {
-          try {
-            const url = await this.uploadImage(content.images[i], i);
-            imageUrls.push(url);
-          } catch {
-            // If upload fails, skip replacement for this image
-            imageUrls.push("");
-          }
-        }
-      }
 
       // Extract title from first # heading or first line
       const lines = rawText.split("\n");
@@ -106,14 +78,8 @@ export class DevToAdapter implements Adapter {
       }
       if (title.length > 128) title = title.slice(0, 125) + "...";
 
-      // Replace ./image-N.png references with uploaded URLs
-      if (imageUrls.length > 0) {
-        body = body.replace(/!\[([^\]]*)\]\(\.\/image-(\d+)\.(?:png|jpg|jpeg|gif|webp)\)/gi, (_match, alt, idx) => {
-          const i = parseInt(idx, 10);
-          const url = i < imageUrls.length ? imageUrls[i] : "";
-          return url ? `![${alt}](${url})` : `![${alt}](./image-${i}.png)`;
-        });
-      }
+      // DEV.to has no image upload API — strip any local ./image-N.png refs
+      body = stripLocalImageRefs(body);
 
       const article: Record<string, unknown> = {
         title,

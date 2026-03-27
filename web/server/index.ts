@@ -8,6 +8,7 @@ import {
 } from "./routes/announce.js";
 import { handleScreenshot } from "./routes/screenshots.js";
 import { handlePost } from "./routes/post.js";
+import { handleGetSession, handleImportSession, handleCloseSession } from "./routes/session.js";
 
 const PORT = 3420;
 
@@ -23,7 +24,7 @@ Bun.serve({
     if (method === "OPTIONS") {
       return new Response(null, {
         status: 204,
-        headers: corsHeaders(),
+        headers: corsHeaders(req.headers.get("origin")),
       });
     }
 
@@ -69,8 +70,30 @@ Bun.serve({
       } else if (method === "POST" && pathname === "/api/post") {
         response = await handlePost(req);
 
+      } else if (method === "GET" && pathname.startsWith("/api/session/")) {
+        const parts = pathname.split("/");
+        // /api/session/:sessionId
+        if (parts.length === 4) {
+          response = handleGetSession(parts[3]);
+        } else {
+          response = new Response("Not found", { status: 404 });
+        }
+
+      } else if (method === "POST" && pathname === "/api/session/import") {
+        response = await handleImportSession(req);
+
+      } else if (method === "POST" && pathname.startsWith("/api/session/")) {
+        const parts = pathname.split("/");
+        // /api/session/:sessionId/close
+        if (parts.length === 5 && parts[4] === "close") {
+          response = handleCloseSession(parts[3]);
+        } else {
+          response = new Response("Not found", { status: 404 });
+        }
+
       } else {
-        response = new Response("Not found", { status: 404 });
+        // Try serving static files from dist-web (built client)
+        response = await serveStatic(pathname);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -79,8 +102,9 @@ Bun.serve({
     }
 
     // Attach CORS headers to every response
+    const origin = req.headers.get("origin");
     const headers = new Headers(response.headers);
-    for (const [k, v] of Object.entries(corsHeaders())) {
+    for (const [k, v] of Object.entries(corsHeaders(origin))) {
       headers.set(k, v);
     }
     return new Response(response.body, {
@@ -92,9 +116,40 @@ Bun.serve({
 
 console.log(`CrossPost API server running on http://localhost:${PORT}`);
 
-function corsHeaders(): Record<string, string> {
+async function serveStatic(pathname: string): Promise<Response> {
+  const { join, resolve } = await import("path");
+  const { existsSync } = await import("fs");
+
+  const distDir = resolve(import.meta.dir, "../../dist-web");
+  if (!existsSync(distDir)) {
+    return new Response("Web UI not built. Run: bun run web:build", { status: 503 });
+  }
+
+  // Sanitize path
+  const safePath = pathname === "/" ? "/index.html" : pathname;
+  const filePath = join(distDir, safePath);
+
+  // Prevent path traversal
+  if (!filePath.startsWith(distDir)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const file = Bun.file(filePath);
+  if (await file.exists()) {
+    return new Response(file);
+  }
+
+  // SPA fallback — serve index.html for any unknown path
+  return new Response(Bun.file(join(distDir, "index.html")));
+}
+
+function corsHeaders(origin?: string | null): Record<string, string> {
+  // Allow any localhost origin (vite dev server on 5173, built server on PORT, etc.)
+  const allowedOrigin = origin && /^http:\/\/localhost(:\d+)?$/.test(origin)
+    ? origin
+    : `http://localhost:5173`;
   return {
-    "Access-Control-Allow-Origin": "http://localhost:5173",
+    "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };

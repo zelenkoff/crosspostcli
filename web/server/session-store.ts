@@ -50,6 +50,8 @@ export interface Session {
   /** Unblocks the paused onScreenshotPlanReady inside runAgentLoop */
   screenshotPlanResolverFn?: (plan: ScreenshotPlan | null) => void;
   aborted: boolean;
+  /** Set to true when the browser preview UI signals it is done (posted or closed) */
+  webClosed?: boolean;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
