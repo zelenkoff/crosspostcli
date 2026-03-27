@@ -8,8 +8,6 @@ const PLATFORM_DISPLAY: Record<string, string> = {
   x: "X/Twitter",
   bluesky: "Bluesky",
   mastodon: "Mastodon",
-  medium: "Medium",
-  discord: "Discord",
   blog: "Blog",
 };
 
@@ -68,10 +66,6 @@ export async function handleStatus(): Promise<Response> {
       const lang = bluesky.language;
       detail = (bluesky.handle ?? "connected") + (lang ? ` [${lang}]` : "");
     }
-    if (valid && baseKey === "discord") {
-      const hooks = (adapter as any).config?.webhooks as Array<{ url: string; label?: string }> | undefined;
-      if (hooks) detail = hooks.map((h) => h.label ?? h.url.slice(0, 30) + "…").join(", ");
-    }
     if (valid && baseKey === "x") {
       const lang = config.platforms.x.language;
       detail = "connected" + (lang ? ` [${lang}]` : "");
@@ -79,10 +73,6 @@ export async function handleStatus(): Promise<Response> {
     if (valid && baseKey === "mastodon") {
       const lang = config.platforms.mastodon.language;
       detail = (config.platforms.mastodon.instance_url ?? "connected") + (lang ? ` [${lang}]` : "");
-    }
-    if (valid && baseKey === "medium") {
-      const lang = config.platforms.medium.language;
-      detail = `${config.platforms.medium.publish_status} draft` + (lang ? ` [${lang}]` : "");
     }
     if (valid && baseKey === "devto") {
       const lang = config.platforms.devto.language;

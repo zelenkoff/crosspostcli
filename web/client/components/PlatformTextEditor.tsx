@@ -5,8 +5,6 @@ const PLATFORM_LIMITS: Record<string, number> = {
   bluesky: 300,
   mastodon: 500,
   telegram: 4096,
-  discord: 2000,
-  medium: 50000,
   blog: 100000,
 };
 
@@ -19,7 +17,7 @@ function getPlatformIcon(key: string): string {
   const base = key.split(":")[0];
   const icons: Record<string, string> = {
     telegram: "✈", x: "✕", bluesky: "☁", mastodon: "🐘",
-    medium: "M", discord: "◈", blog: "📝",
+    blog: "📝",
   };
   return icons[base] ?? "◆";
 }
@@ -28,7 +26,7 @@ function getPlatformLabel(key: string): string {
   const [base, lang] = key.split(":");
   const names: Record<string, string> = {
     telegram: "Telegram", x: "X / Twitter", bluesky: "Bluesky",
-    mastodon: "Mastodon", medium: "Medium", discord: "Discord", blog: "Blog",
+    mastodon: "Mastodon", blog: "Blog",
   };
   const name = names[base] ?? base;
   return lang ? `${name} [${lang}]` : name;

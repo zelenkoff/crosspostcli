@@ -94,8 +94,6 @@ export function createMcpServer() {
       x_text: z.string().optional().describe("Custom text override for X/Twitter"),
       bluesky_text: z.string().optional().describe("Custom text override for Bluesky"),
       mastodon_text: z.string().optional().describe("Custom text override for Mastodon"),
-      discord_text: z.string().optional().describe("Custom text override for Discord"),
-      medium_text: z.string().optional().describe("Custom text override for Medium"),
     },
     async (params) => {
       if (!configExists()) {
@@ -117,8 +115,6 @@ export function createMcpServer() {
       if (params.x_text) postOptions.perPlatformText!.x = params.x_text;
       if (params.bluesky_text) postOptions.perPlatformText!.bluesky = params.bluesky_text;
       if (params.mastodon_text) postOptions.perPlatformText!.mastodon = params.mastodon_text;
-      if (params.discord_text) postOptions.perPlatformText!.discord = params.discord_text;
-      if (params.medium_text) postOptions.perPlatformText!.medium = params.medium_text;
 
       const allAdapters = createAdapters(config, postOptions);
       const adapters = filterAdapters(allAdapters, postOptions);

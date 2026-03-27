@@ -35,30 +35,12 @@ export const MastodonConfigSchema = z.object({
   language: z.string().optional(),
 });
 
-export const MediumConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  integration_token: z.string().optional(),
-  publish_status: z.enum(["draft", "public"]).default("draft"),
-  language: z.string().optional(),
-});
-
 export const DevToConfigSchema = z.object({
   enabled: z.boolean().default(false),
   api_key: z.string().optional(),
   publish_status: z.enum(["draft", "public"]).default("public"),
   tags: z.array(z.string()).default([]),
   language: z.string().optional(),
-});
-
-export const DiscordWebhookSchema = z.object({
-  url: z.string().min(1),
-  label: z.string().optional(),
-  language: z.string().optional(),
-});
-
-export const DiscordConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  webhooks: z.array(DiscordWebhookSchema).default([]),
 });
 
 export const BlogConfigSchema = z.object({
@@ -113,9 +95,7 @@ export const ConfigSchema = z.object({
       x: XConfigSchema.default({}),
       bluesky: BlueskyConfigSchema.default({}),
       mastodon: MastodonConfigSchema.default({}),
-      medium: MediumConfigSchema.default({}),
       devto: DevToConfigSchema.default({}),
-      discord: DiscordConfigSchema.default({}),
       blog: BlogConfigSchema.default({}),
     })
     .default({}),
@@ -131,8 +111,6 @@ export type TelegramConfig = z.infer<typeof TelegramConfigSchema>;
 export type XConfig = z.infer<typeof XConfigSchema>;
 export type BlueskyConfig = z.infer<typeof BlueskyConfigSchema>;
 export type MastodonConfig = z.infer<typeof MastodonConfigSchema>;
-export type MediumConfig = z.infer<typeof MediumConfigSchema>;
-export type DiscordConfig = z.infer<typeof DiscordConfigSchema>;
 export type BlogConfig = z.infer<typeof BlogConfigSchema>;
 export type ScreenshotConfig = z.infer<typeof ScreenshotConfigSchema>;
 export type AiConfig = z.infer<typeof AiConfigSchema>;
@@ -143,7 +121,6 @@ export const PLATFORM_NAMES = [
   "bluesky",
   "mastodon",
   "devto",
-  "discord",
   "blog",
 ] as const;
 

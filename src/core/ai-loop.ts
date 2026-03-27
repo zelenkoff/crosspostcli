@@ -100,7 +100,7 @@ export type AgentPhase = "analyzing" | "planning" | "screenshotting" | "composin
 
 export interface AgentLoopResult {
   texts: Map<string, string>;
-  /** Per-platform titles (for blog/medium articles) */
+  /** Per-platform titles (for blog/devto articles) */
   titles: Map<string, string>;
   screenshots: CapturedScreenshot[];
   /** Per-platform screenshot indices (which screenshots to attach) */
@@ -414,7 +414,7 @@ function buildComposePrompt(
   screenshots.forEach((s, i) => {
     platformParts.push(`  ./image-${i}.png — ${s.instruction.description}`);
   });
-  platformParts.push(`\nFor blog and medium posts, embed screenshots INLINE as you write:`);
+  platformParts.push(`\nFor blog and devto posts, embed screenshots INLINE as you write:`);
   platformParts.push(`1. Write a paragraph about a user-facing change.`);
   platformParts.push(`2. Ask: which screenshot above shows what I just described?`);
   platformParts.push(`3. If there's a match, embed it immediately after: ![brief description of what users see](./image-N.png)`);
@@ -444,7 +444,7 @@ function buildComposePrompt(
 
   const hasBluesky = platforms.some((p) => p.key === "bluesky");
   const keys = platforms.map((p) => {
-    const isLongForm = p.key === "blog" || p.key === "medium" || p.key === "devto";
+    const isLongForm = p.key === "blog" || p.key === "devto";
     if (p.key === "bluesky") {
       return `"bluesky": {"thread": [{"text": "hook post...", "imageIndex": 0}, {"text": "feature 1...", "imageIndex": 1}], "screenshots": [0, 1]}`;
     }

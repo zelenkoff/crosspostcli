@@ -4,9 +4,7 @@ import { TelegramAdapter } from "../adapters/telegram.js";
 import { XTwitterAdapter } from "../adapters/x-twitter.js";
 import { BlueskyAdapter } from "../adapters/bluesky.js";
 import { MastodonAdapter } from "../adapters/mastodon.js";
-import { MediumAdapter } from "../adapters/medium.js";
 import { DevToAdapter } from "../adapters/devto.js";
-import { DiscordAdapter } from "../adapters/discord.js";
 import { BlogGitAdapter } from "../adapters/blog-git.js";
 import { optimizeForPlatform } from "../utils/image.js";
 
@@ -60,28 +58,8 @@ export function createAdapters(config: Config, options?: PostOptions): Map<strin
   if (p.mastodon.enabled && p.mastodon.access_token) {
     adapters.set("mastodon", new MastodonAdapter(p.mastodon));
   }
-  if (p.medium.enabled && p.medium.integration_token) {
-    adapters.set("medium", new MediumAdapter(p.medium));
-  }
   if (p.devto.enabled && p.devto.api_key) {
     adapters.set("devto", new DevToAdapter(p.devto));
-  }
-  if (p.discord.enabled && p.discord.webhooks.length > 0) {
-    const languages = [...new Set(p.discord.webhooks.map((w) => w.language ?? "").filter(Boolean))];
-    const hasNoLang = p.discord.webhooks.some((w) => !w.language);
-
-    if (languages.length > 1 || (languages.length === 1 && hasNoLang)) {
-      for (const lang of languages) {
-        const langWebhooks = p.discord.webhooks.filter((w) => w.language === lang);
-        adapters.set(`discord:${lang}`, new DiscordAdapter({ ...p.discord, webhooks: langWebhooks }));
-      }
-      if (hasNoLang) {
-        const noLangWebhooks = p.discord.webhooks.filter((w) => !w.language);
-        adapters.set("discord", new DiscordAdapter({ ...p.discord, webhooks: noLangWebhooks }));
-      }
-    } else {
-      adapters.set("discord", new DiscordAdapter(p.discord));
-    }
   }
   if (p.blog.enabled && p.blog.content_dir) {
     adapters.set(
@@ -103,7 +81,7 @@ export function filterAdapters(
 ): Map<string, Adapter> {
   const filtered = new Map(adapters);
 
-  // Keys can be "telegram", "telegram:ru", "discord:en" etc.
+  // Keys can be "telegram", "telegram:ru", "telegram:en" etc.
   // Match by exact key OR by base platform name (part before ":").
   const matchesAny = (key: string, names: Set<string>): boolean => {
     if (names.has(key)) return true;

@@ -13,7 +13,6 @@ const PLATFORM_DISPLAY: Record<string, string> = {
   bluesky: "Bluesky",
   mastodon: "Mastodon",
   devto: "DEV.to",
-  discord: "Discord",
   blog: "Blog (MDX/MD)",
 };
 
@@ -43,10 +42,6 @@ const PLATFORM_FIELDS: Record<string, Array<{ key: string; label: string; secret
   devto: [
     { key: "api_key", label: "API Key (from dev.to/settings/extensions)", secret: true },
     { key: "language", label: "Language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
-  ],
-  discord: [
-    { key: "_webhook_url", label: "Webhook URL", secret: true },
-    { key: "_webhook_language", label: "Webhook language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
   ],
   blog: [
     { key: "content_dir", label: "Content directory path", secret: false },
@@ -130,20 +125,6 @@ function InitWizard() {
             if (channels.length > 0) {
               channels[channels.length - 1].language = value;
               platConfig.channels = channels;
-            }
-          }
-        } else if (field.key === "_webhook_url") {
-          // Discord webhooks
-          const webhooks = (platConfig.webhooks as Array<{ url: string; language?: string }>) ?? [];
-          webhooks.push({ url: value });
-          platConfig.webhooks = webhooks;
-        } else if (field.key === "_webhook_language") {
-          // Set language on the last added Discord webhook
-          if (value) {
-            const webhooks = (platConfig.webhooks as Array<{ url: string; language?: string }>) ?? [];
-            if (webhooks.length > 0) {
-              webhooks[webhooks.length - 1].language = value;
-              platConfig.webhooks = webhooks;
             }
           }
         } else if (value) {

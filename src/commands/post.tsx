@@ -38,8 +38,6 @@ interface PostCommandOptions {
   x?: string;
   bluesky?: string;
   mastodon?: string;
-  discord?: string;
-  medium?: string;
 }
 
 async function resolveScreenshot(options: PostCommandOptions): Promise<Buffer | undefined> {
@@ -115,8 +113,6 @@ function PostUI({ text, options }: { text: string; options: PostCommandOptions }
         if (options.x) postOptions.perPlatformText!.x = options.x;
         if (options.bluesky) postOptions.perPlatformText!.bluesky = options.bluesky;
         if (options.mastodon) postOptions.perPlatformText!.mastodon = options.mastodon;
-        if (options.discord) postOptions.perPlatformText!.discord = options.discord;
-        if (options.medium) postOptions.perPlatformText!.medium = options.medium;
 
         const allAdapters = createAdapters(config, postOptions);
         const adapters = filterAdapters(allAdapters, postOptions);

@@ -67,8 +67,6 @@ export interface AnnounceCommandOptions {
   x?: string;
   bluesky?: string;
   mastodon?: string;
-  discord?: string;
-  medium?: string;
   ai?: boolean;
   aiProvider?: string;
   aiModel?: string;

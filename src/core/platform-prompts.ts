@@ -2,7 +2,7 @@
  * Platform-specific formatting rules and configurable system prompts.
  *
  * Provides rich default prompts that encode per-platform best practices
- * (Telegram: one screenshot + structured text, Medium: article with inline images, etc.)
+ * (Telegram: one screenshot + structured text, Blog: article with inline images, etc.)
  * and allows users to override via --system-prompt or config.
  */
 
@@ -63,19 +63,6 @@ export const PLATFORM_FORMATTING_RULES: Record<string, string> = {
     "- Explain the value in human terms — what changed for the user.\n" +
     "- Conversational tone fits the platform culture.",
 
-  medium:
-    "Medium article rules:\n" +
-    "- Write for a general audience, not developers. Hook them in the opening line.\n" +
-    "- Structure: hook → before/now → walkthrough (one section per feature with screenshot) → payoff.\n" +
-    "- Each feature section: describe what users see and can do, then immediately embed the screenshot that shows it.\n" +
-    "- Use markdown headers (##, ###) named after USER BENEFITS, not technical categories.\n" +
-    "  Bad: 'API Improvements'. Good: 'Search is Now Instant'.\n" +
-    "- Short paragraphs (2-3 sentences). Let screenshots do the storytelling.\n" +
-    "- Tell a story: what was the problem → what's new → what users get out of it.\n" +
-    "- Write like you're explaining to a smart friend who doesn't read code.\n" +
-    "- Open with a compelling hook, close with a specific link to try it.\n" +
-    "- 600-1500 words. No code blocks, no jargon, no technical details.",
-
   devto:
     "DEV.to article rules:\n" +
     "- Write for developers and technical makers, but keep it human and approachable.\n" +
@@ -101,13 +88,6 @@ export const PLATFORM_FORMATTING_RULES: Record<string, string> = {
     "- End with a specific link to try the feature — not a generic CTA.\n" +
     "- 400-1500 words depending on scope.",
 
-  discord:
-    "Discord post rules:\n" +
-    "- Moderate length, supports markdown (bold, italic, code blocks, lists).\n" +
-    "- 1-2 screenshots work well.\n" +
-    "- Conversational, community-focused tone.\n" +
-    "- Write like you're sharing exciting news with your community — casual and human.\n" +
-    "- Lead with what's exciting, then details.",
 };
 
 // ── Default System Prompts ──────────────────────────────────────────────
@@ -140,7 +120,7 @@ export const DEFAULT_COMPOSE_SYSTEM_PROMPT =
   "- Reference what's visible in the screenshots naturally — describe the UI elements you see, not abstract features.\n" +
   "- Never use generic CTAs like 'Check it out!' or 'Visit your dashboard!' without a specific URL.\n" +
   "- No hashtags unless explicitly asked.\n\n" +
-  "FOR BLOG/MEDIUM ARTICLES — structure every article as a story with four parts:\n" +
+  "FOR BLOG ARTICLES — structure every article as a story with four parts:\n" +
   "  1. HOOK (1-2 sentences): Why should the reader care? Answer this before anything else.\n" +
   "  2. BEFORE/NOW (1 short paragraph): What was the problem? What changed?\n" +
   "  3. WALKTHROUGH (one section per feature/change): Describe what users see and can do. After each section, embed the matching screenshot.\n" +

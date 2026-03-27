@@ -11,8 +11,6 @@ const PLATFORM_LIMITS: Record<string, PlatformImageLimits> = {
   x: { maxSize: 5_000_000, maxWidth: 4096, maxHeight: 4096, format: "jpeg", quality: 85 },
   bluesky: { maxSize: 1_000_000, maxWidth: 800, maxHeight: 800, format: "jpeg", quality: 75 },
   mastodon: { maxSize: 10_000_000, maxWidth: 1280, maxHeight: 1280, format: "jpeg", quality: 90 },
-  discord: { maxSize: 25_000_000, maxWidth: 1920, maxHeight: 1080, format: "png", quality: 95 },
-  medium: { maxSize: 5_000_000, maxWidth: 1400, maxHeight: 1400, format: "jpeg", quality: 85 },
 };
 
 export function getPlatformLimits(platform: string): PlatformImageLimits {
