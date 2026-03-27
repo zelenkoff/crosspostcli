@@ -13,9 +13,11 @@ import {
   type Tone,
   type TemplateType,
   type Verbosity,
+  type PostStyle,
 } from "../core/announce-templates.js";
 import { PostSummary } from "../ui/PostSummary.js";
 import { CommitSelector } from "../ui/CommitSelector.js";
+import { PostStyleSelector } from "../ui/PostStyleSelector.js";
 import { ErrorBox } from "../ui/ErrorBox.js";
 import { StepIndicator } from "../ui/StepIndicator.js";
 import { PlatformStatusLine, type StatusState } from "../ui/PlatformStatus.js";
@@ -82,7 +84,7 @@ export interface AnnounceCommandOptions {
   lang?: string;
 }
 
-type Phase = "gather" | "commit-select" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "content-revise" | "revising" | "posting" | "done" | "error";
+type Phase = "gather" | "commit-select" | "post-style-select" | "discover" | "screenshot" | "ai-generating" | "agent-loop" | "plan-review" | "preview" | "content-revise" | "revising" | "posting" | "done" | "error";
 
 interface PlatformState {
   key: string;
@@ -124,6 +126,8 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
   const [selectedHashes, setSelectedHashes] = useState<string[] | null>(null);
   // Guard: prevent gather useEffect from re-running after commit-select resolver fires
   const gatherDoneRef = React.useRef(false);
+  // Post style selection state
+  const postStyleResolverRef = React.useRef<((style: PostStyle) => void) | null>(null);
 
   const { isRawModeSupported } = useStdin();
   const rawModeOk = isRawModeSupported === true;
@@ -237,15 +241,13 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             language: options.lang,
           });
           setGeneratedTexts(revised.texts);
-          // Update the agent loop result titles if revised
-          if (revised.titles.size > 0) {
-            setAgentLoopResult({
-              ...agentLoopResult,
-              texts: revised.texts,
-              titles: revised.titles,
-              selectedScreenshots: revised.selectedScreenshots,
-            });
-          }
+          setAgentLoopResult({
+            ...agentLoopResult,
+            texts: revised.texts,
+            titles: revised.titles,
+            selectedScreenshots: revised.selectedScreenshots,
+            threads: revised.threads,
+          });
         } else {
           // Simple AI path: regenerate with feedback
           const diff = await getDiffForRange({
@@ -331,19 +333,34 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           return;
         }
 
+        // Post style selection (only when AI is available and not skipping confirms)
+        let postStyle: PostStyle = "auto";
+        if (!options.noConfirm && options.ai !== false) {
+          const cfg = loadConfig();
+          const aiOpts = buildAiOptions(cfg.ai, { provider: options.aiProvider, model: options.aiModel });
+          if (aiOpts) {
+            setPhase("post-style-select");
+            postStyle = await new Promise<PostStyle>((resolve) => {
+              postStyleResolverRef.current = resolve;
+            });
+          }
+        }
+
         // Build context
         const projectName = options.projectName ?? (await getProjectName());
         const tone = (options.tone ?? "casual") as Tone;
         const template = (options.template as TemplateType) ?? detectTemplate(log);
 
+        const _cfg = loadConfig();
         const ctx: AnnounceContext = {
           projectName,
           version: options.version,
           description,
           changelog: log,
-          url: options.url,
+          url: options.url ?? _cfg.project?.url,
           tone,
           template,
+          postStyle,
         };
         setContext(ctx);
 
@@ -753,6 +770,11 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
           postOptions.perPlatformImages = perPlatformImages;
         }
 
+        // Per-platform thread data from agent loop (Bluesky thread mode)
+        if (agentLoopResult?.threads && agentLoopResult.threads.size > 0) {
+          postOptions.perPlatformThread = Object.fromEntries(agentLoopResult.threads);
+        }
+
         const allResults = await postToAll(adapters, content, postOptions, (event) => {
           if (event.type === "start") {
             setPlatformStates((prev) =>
@@ -806,6 +828,22 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             // Resolving unblocks it; set phase to gather so the spinner shows
             // while context is built. The effect won't re-run from scratch
             // because it's already in-flight.
+            setPhase("gather");
+          }
+        }}
+        onAbort={() => process.exit(0)}
+      />
+    );
+  }
+
+  if (phase === "post-style-select") {
+    return (
+      <PostStyleSelector
+        onConfirm={(style) => {
+          const resolver = postStyleResolverRef.current;
+          if (resolver) {
+            postStyleResolverRef.current = null;
+            resolver(style);
             setPhase("gather");
           }
         }}
@@ -916,7 +954,9 @@ function AnnounceUI({ options }: { options: AnnounceCommandOptions }) {
             {contentPlan.keyChanges.map((change, i) => (
               <Text key={i}>  - {change}</Text>
             ))}
-            <Text><Text bold>Screenshot strategy:</Text> {contentPlan.screenshotStrategy}</Text>
+            {contentPlan.screenshotStrategy ? (
+              <Text><Text bold>Screenshot strategy:</Text> {contentPlan.screenshotStrategy}</Text>
+            ) : null}
             {contentPlan.suggestedTone && (
               <Text><Text bold>Tone:</Text> {contentPlan.suggestedTone}</Text>
             )}
@@ -1167,17 +1207,17 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
       const tone = (options.tone ?? "casual") as Tone;
       const template = (options.template as TemplateType) ?? detectTemplate(changelog);
 
+      const config = loadConfig();
       const ctx: AnnounceContext = {
         projectName,
         version: options.version,
         description,
         changelog,
-        url: options.url,
+        url: options.url ?? config.project?.url,
         tone,
         template,
       };
 
-      const config = loadConfig();
       const postOptions: PostOptions = { only: options.only, exclude: options.exclude };
       const adapters = filterAdapters(createAdapters(config, postOptions), postOptions);
 
@@ -1268,17 +1308,17 @@ export async function runAnnounceCommand(options: AnnounceCommandOptions): Promi
       const tone = (options.tone ?? "casual") as Tone;
       const template = (options.template as TemplateType) ?? detectTemplate(changelog);
 
+      const config = loadConfig();
       const ctx: AnnounceContext = {
         projectName,
         version: options.version,
         description,
         changelog,
-        url: options.url,
+        url: options.url ?? config.project?.url,
         tone,
         template,
       };
 
-      const config = loadConfig();
       const postOpts: PostOptions = { only: options.only, exclude: options.exclude };
       const adapters = filterAdapters(createAdapters(config, postOpts), postOpts);
 

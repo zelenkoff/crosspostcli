@@ -1,10 +1,11 @@
-import type { Adapter, PostContent, PostResult } from "../adapters/types.js";
+import type { Adapter, PostContent, PostResult, ThreadPost } from "../adapters/types.js";
 import type { Config, PlatformName } from "../config/schema.js";
 import { TelegramAdapter } from "../adapters/telegram.js";
 import { XTwitterAdapter } from "../adapters/x-twitter.js";
 import { BlueskyAdapter } from "../adapters/bluesky.js";
 import { MastodonAdapter } from "../adapters/mastodon.js";
 import { MediumAdapter } from "../adapters/medium.js";
+import { DevToAdapter } from "../adapters/devto.js";
 import { DiscordAdapter } from "../adapters/discord.js";
 import { BlogGitAdapter } from "../adapters/blog-git.js";
 import { optimizeForPlatform } from "../utils/image.js";
@@ -19,6 +20,8 @@ export interface PostOptions {
   blogTags?: string[];
   perPlatformText?: Record<string, string>;
   perPlatformImages?: Record<string, Buffer[]>;
+  /** Thread posts per platform (e.g. Bluesky thread segments) */
+  perPlatformThread?: Record<string, ThreadPost[]>;
 }
 
 export type PostingEvent =
@@ -59,6 +62,9 @@ export function createAdapters(config: Config, options?: PostOptions): Map<strin
   }
   if (p.medium.enabled && p.medium.integration_token) {
     adapters.set("medium", new MediumAdapter(p.medium));
+  }
+  if (p.devto.enabled && p.devto.api_key) {
+    adapters.set("devto", new DevToAdapter(p.devto));
   }
   if (p.discord.enabled && p.discord.webhooks.length > 0) {
     const languages = [...new Set(p.discord.webhooks.map((w) => w.language ?? "").filter(Boolean))];
@@ -134,6 +140,11 @@ export async function postToAll(
     // Use per-platform images if available (agent loop assigns different screenshots per platform)
     if (options.perPlatformImages?.[key]) {
       platformContent.images = options.perPlatformImages[key];
+    }
+
+    // Use per-platform thread if available (Bluesky thread mode)
+    if (options.perPlatformThread?.[key]) {
+      platformContent.thread = options.perPlatformThread[key];
     }
 
     // Optimize images per platform

@@ -84,6 +84,10 @@ export async function handleStatus(): Promise<Response> {
       const lang = config.platforms.medium.language;
       detail = `${config.platforms.medium.publish_status} draft` + (lang ? ` [${lang}]` : "");
     }
+    if (valid && baseKey === "devto") {
+      const lang = config.platforms.devto.language;
+      detail = `${config.platforms.devto.publish_status}` + (lang ? ` [${lang}]` : "");
+    }
     if (valid && baseKey === "blog") {
       const lang = config.platforms.blog.language;
       const dir = config.platforms.blog.content_dir ?? "not set";

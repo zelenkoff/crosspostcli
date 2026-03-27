@@ -71,7 +71,10 @@ function buildPrompt(
   parts.push(`## Project`);
   parts.push(`Name: ${ctx.projectName}`);
   if (ctx.version) parts.push(`Version: ${ctx.version}`);
-  if (ctx.url) parts.push(`URL: ${ctx.url}`);
+  if (ctx.url) {
+    parts.push(`URL: ${ctx.url}`);
+    parts.push(`IMPORTANT: Every post MUST end with a link to this URL. Use the exact URL above — do not invent or modify it.`);
+  }
 
   if (ctx.description) {
     parts.push(`\n## Description\n${ctx.description}`);
@@ -87,6 +90,15 @@ function buildPrompt(
   }
 
   parts.push(`\n## Tone\n${ctx.tone} — ${TONE_DESCRIPTIONS[ctx.tone]}`);
+
+  if (ctx.postStyle && ctx.postStyle !== "auto") {
+    parts.push(`\n## Post Structure`);
+    if (ctx.postStyle === "single-narrative") {
+      parts.push(`Write ONE cohesive story that ties all changes together. Do NOT list features separately as bullet points. Weave all changes into a single narrative arc with a clear beginning, middle, and end. The reader should feel like they're hearing about one meaningful improvement, not a changelog.`);
+    } else if (ctx.postStyle === "feature-list") {
+      parts.push(`Structure the post as a list of distinct updates — one dedicated section or bullet per feature/commit. Each change gets its own paragraph or bullet point. Make it easy to skim: users should be able to jump to the feature they care about.`);
+    }
+  }
 
   if (verbosity) {
     const verbosityDesc: Record<Verbosity, string> = {

@@ -12,7 +12,7 @@ const PLATFORM_DISPLAY: Record<string, string> = {
   x: "X / Twitter",
   bluesky: "Bluesky",
   mastodon: "Mastodon",
-  medium: "Medium",
+  devto: "DEV.to",
   discord: "Discord",
   blog: "Blog (MDX/MD)",
 };
@@ -40,8 +40,8 @@ const PLATFORM_FIELDS: Record<string, Array<{ key: string; label: string; secret
     { key: "access_token", label: "Access Token", secret: true },
     { key: "language", label: "Language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
   ],
-  medium: [
-    { key: "integration_token", label: "Integration Token", secret: true },
+  devto: [
+    { key: "api_key", label: "API Key (from dev.to/settings/extensions)", secret: true },
     { key: "language", label: "Language (e.g., en, ru, es — or Enter to skip)", secret: false, optional: true },
   ],
   discord: [
@@ -54,7 +54,7 @@ const PLATFORM_FIELDS: Record<string, Array<{ key: string; label: string; secret
   ],
 };
 
-type Step = "welcome" | "select" | "credentials" | "testing" | "ai-setup" | "complete";
+type Step = "welcome" | "select" | "credentials" | "testing" | "ai-setup" | "project-url" | "complete";
 type AiSetupField = "ask" | "provider" | "api_key";
 
 function InitWizard() {
@@ -67,6 +67,7 @@ function InitWizard() {
   const [inputValue, setInputValue] = useState("");
   const [config, setConfig] = useState<Config>(loadConfig());
   const [validationResults, setValidationResults] = useState<Map<string, boolean>>(new Map());
+  const [validationErrors, setValidationErrors] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [aiSetupField, setAiSetupField] = useState<AiSetupField>("ask");
   const [aiProvider, setAiProvider] = useState<"anthropic" | "openai">("anthropic");
@@ -182,7 +183,7 @@ function InitWizard() {
           setAiSetupField("provider");
           setAiCursor(0);
         } else if (lower === "n" || key.escape) {
-          setStep("complete");
+          setStep("project-url");
         }
         return;
       }
@@ -210,7 +211,7 @@ function InitWizard() {
           setConfig(newConfig as Config);
           saveConfig(newConfig as Config);
           setInputValue("");
-          setStep("complete");
+          setStep("project-url");
         } else if (key.backspace || key.delete) {
           setInputValue((v) => v.slice(0, -1));
         } else if (input && !key.ctrl && !key.meta) {
@@ -218,6 +219,25 @@ function InitWizard() {
         }
         return;
       }
+    }
+
+    if (step === "project-url") {
+      if (key.return) {
+        const url = inputValue.trim();
+        if (url) {
+          const newConfig = { ...config };
+          newConfig.project = { ...newConfig.project, url };
+          setConfig(newConfig as Config);
+          saveConfig(newConfig as Config);
+        }
+        setInputValue("");
+        setStep("complete");
+      } else if (key.backspace || key.delete) {
+        setInputValue((v) => v.slice(0, -1));
+      } else if (input && !key.ctrl && !key.meta) {
+        setInputValue((v) => v + input);
+      }
+      return;
     }
   });
 
@@ -227,11 +247,31 @@ function InitWizard() {
     async function test() {
       try {
         const adapters = createAdapters(config);
-        const results = await validateAll(adapters);
+        // Run validation per-adapter and capture any errors
+        const results = new Map<string, boolean>();
+        const errors = new Map<string, string>();
+        await Promise.all(
+          Array.from(adapters.entries()).map(async ([key, adapter]) => {
+            try {
+              // Use validateOrThrow if available (gives richer errors), fall back to validate()
+              if ("validateOrThrow" in adapter && typeof (adapter as any).validateOrThrow === "function") {
+                await (adapter as any).validateOrThrow();
+                results.set(key, true);
+              } else {
+                const ok = await adapter.validate();
+                results.set(key, ok);
+                if (!ok) errors.set(key, "Authentication failed — check credentials");
+              }
+            } catch (err) {
+              results.set(key, false);
+              errors.set(key, err instanceof Error ? err.message : String(err));
+            }
+          })
+        );
         setValidationResults(results);
-        // If AI is already configured, skip AI setup
+        setValidationErrors(errors);
         if (config.ai?.api_key) {
-          setStep("complete");
+          setStep("project-url");
         } else {
           setStep("ai-setup");
         }
@@ -306,6 +346,16 @@ function InitWizard() {
     const totalSteps = selectedList.length;
     const currentStep = currentPlatformIndex + 1;
 
+    // Platform-specific hints shown below the input
+    const hint =
+      platform === "bluesky" && field.key === "app_password"
+        ? "Use an App Password — NOT your account password.\nCreate one at: bsky.app/settings/app-passwords"
+        : platform === "bluesky" && field.key === "handle"
+        ? "e.g. username.bsky.social  (don't include @)"
+        : platform === "devto" && field.key === "api_key"
+        ? "Get your API key at: dev.to/settings/extensions"
+        : null;
+
     return (
       <Box flexDirection="column" paddingX={1}>
         <Box marginBottom={1}>
@@ -321,6 +371,13 @@ function InitWizard() {
           <Text color="cyan">{field.secret ? "•".repeat(inputValue.length) : inputValue}</Text>
           <Text>{"█"}</Text>
         </Box>
+        {hint && (
+          <Box marginTop={1}>
+            {hint.split("\n").map((line, i) => (
+              <Text key={i} dimColor>{line}</Text>
+            ))}
+          </Box>
+        )}
         <StepIndicator current={currentStep} total={totalSteps} label={PLATFORM_DISPLAY[platform]} />
       </Box>
     );
@@ -393,15 +450,43 @@ function InitWizard() {
     );
   }
 
+  if (step === "project-url") {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <Box marginBottom={1}>
+          <Text bold color="cyan">
+            {"◆ CrossPost Setup — Project URL"}
+          </Text>
+        </Box>
+        <Text>Enter the public URL of your app or product.</Text>
+        <Text dimColor>This will be appended to every post so readers can find your app.</Text>
+        <Box marginTop={1}>
+          <Text>URL (press Enter to skip): </Text>
+          <Text color="cyan">{inputValue}</Text>
+          <Text>{"█"}</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text dimColor>e.g. https://myapp.com or https://myapp.com/changelog</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   // Complete
   const details = selectedList.map((p) => {
     const valid = validationResults.get(p);
-    return `${valid ? "✓" : "✗"} ${PLATFORM_DISPLAY[p]} — ${valid ? "connected" : "failed"}`;
+    const errMsg = validationErrors.get(p);
+    if (valid) return `✓ ${PLATFORM_DISPLAY[p]} — connected`;
+    if (errMsg) return `✗ ${PLATFORM_DISPLAY[p]} — ${errMsg}`;
+    return `✗ ${PLATFORM_DISPLAY[p]} — failed`;
   });
 
   if (config.ai?.api_key) {
     const providerLabel = config.ai.provider === "openai" ? "OpenAI" : "Anthropic";
     details.push(`✓ AI (${providerLabel}) — configured`);
+  }
+  if (config.project?.url) {
+    details.push(`✓ Project URL — ${config.project.url}`);
   }
 
   return (

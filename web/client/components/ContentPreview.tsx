@@ -10,7 +10,7 @@ interface ContentPreviewProps {
 
 function getPlatformFormat(key: string): "markdown" | "html" | "plain" {
   const base = key.split(":")[0];
-  if (base === "blog" || base === "medium") return "markdown";
+  if (base === "blog" || base === "medium" || base === "devto") return "markdown";
   if (base === "telegram") return "html";
   return "plain";
 }

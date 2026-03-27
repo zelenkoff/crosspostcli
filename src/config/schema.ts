@@ -42,6 +42,14 @@ export const MediumConfigSchema = z.object({
   language: z.string().optional(),
 });
 
+export const DevToConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  api_key: z.string().optional(),
+  publish_status: z.enum(["draft", "public"]).default("public"),
+  tags: z.array(z.string()).default([]),
+  language: z.string().optional(),
+});
+
 export const DiscordWebhookSchema = z.object({
   url: z.string().min(1),
   label: z.string().optional(),
@@ -91,8 +99,14 @@ export const DefaultsSchema = z.object({
   url_template: z.string().optional(),
 });
 
+export const ProjectSchema = z.object({
+  url: z.string().optional(),
+  name: z.string().optional(),
+});
+
 export const ConfigSchema = z.object({
   version: z.number().default(1),
+  project: ProjectSchema.default({}),
   platforms: z
     .object({
       telegram: TelegramConfigSchema.default({}),
@@ -100,6 +114,7 @@ export const ConfigSchema = z.object({
       bluesky: BlueskyConfigSchema.default({}),
       mastodon: MastodonConfigSchema.default({}),
       medium: MediumConfigSchema.default({}),
+      devto: DevToConfigSchema.default({}),
       discord: DiscordConfigSchema.default({}),
       blog: BlogConfigSchema.default({}),
     })
@@ -110,6 +125,8 @@ export const ConfigSchema = z.object({
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
+export type ProjectConfig = z.infer<typeof ProjectSchema>;
+export type DevToConfig = z.infer<typeof DevToConfigSchema>;
 export type TelegramConfig = z.infer<typeof TelegramConfigSchema>;
 export type XConfig = z.infer<typeof XConfigSchema>;
 export type BlueskyConfig = z.infer<typeof BlueskyConfigSchema>;
@@ -125,7 +142,7 @@ export const PLATFORM_NAMES = [
   "x",
   "bluesky",
   "mastodon",
-  "medium",
+  "devto",
   "discord",
   "blog",
 ] as const;

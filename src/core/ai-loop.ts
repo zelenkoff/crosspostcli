@@ -105,6 +105,8 @@ export interface AgentLoopResult {
   screenshots: CapturedScreenshot[];
   /** Per-platform screenshot indices (which screenshots to attach) */
   selectedScreenshots: Map<string, number[]>;
+  /** Thread posts per platform (Bluesky thread mode) */
+  threads: Map<string, import("../adapters/types.js").ThreadPost[]>;
   plan: ScreenshotPlan;
   /** Content plan from the analysis phase */
   contentPlan?: ContentPlan;
@@ -185,9 +187,13 @@ function buildAnalysisPrompt(
   parts.push(`\n3. TARGET AUDIENCE:`);
   parts.push(`   - Who benefits most? (e.g., "Users who search frequently", not "developers using the REST API")`);
   parts.push(`   - What do they care about? (Speed? Ease of use? New capabilities?)`);
-  parts.push(`\n4. SCREENSHOT STRATEGY:`);
-  parts.push(`   - List 2-4 UI screens or elements that SHOW the narrative angle in action.`);
-  parts.push(`   - Be specific: not "The settings page" but "The settings page showing the new dark mode toggle with the app in dark mode."`);
+  parts.push(`\n4. SCREENSHOT STRATEGY (required — extract route paths and selectors from the UI diff above):`);
+  parts.push(`   - For Next.js: map the changed file path to the route. app/[lang]/cashback-settings/page.tsx → /{lang}/cashback-settings`);
+  parts.push(`   - Note whether the app uses a language prefix (e.g. /en/) based on the file paths in the diff.`);
+  parts.push(`   - List 2-4 pages with their EXACT route paths (not guesses). Include CSS selectors from the diff for changed elements.`);
+  parts.push(`   - Format: "Route: /en/cashback-settings — Selector: #cashback-triggers — Shows: new cashback trigger panel"`);
+  parts.push(`   - NEVER add /dashboard/ or other prefixes that don't appear in the file paths.`);
+  parts.push(`   - If no diff is available, list the most logical routes based on the commit messages.`);
   parts.push(`\n5. SUGGESTED TONE:`);
   parts.push(`   - Does this update warrant excitement, professionalism, or something else?`);
 
@@ -197,7 +203,7 @@ function buildAnalysisPrompt(
   parts.push(`  "keyChanges": ["change 1 in plain language", "change 2", ...],`);
   parts.push(`  "narrativeAngle": "the story/angle for the announcement",`);
   parts.push(`  "targetAudience": "who cares about this and why",`);
-  parts.push(`  "screenshotStrategy": "what UI elements to look for and why",`);
+  parts.push(`  "screenshotStrategy": "2-4 routes extracted from the diff file paths, e.g. '/en/cashback-settings showing #cashback-triggers; /en/storefront-settings?tab=recommendations showing .rec-card'",`);
   parts.push(`  "suggestedTone": "tone observations for this update"`);
   parts.push(`}`);
 
@@ -254,39 +260,43 @@ function buildPlanPrompt(
   }
 
   parts.push(`\n## Instructions`);
-  parts.push(`Your job: read the UI diff above and produce screenshot instructions that target the ACTUAL changed UI elements.\n`);
-  parts.push(`STEP 1 — Extract from the diff:`);
-  parts.push(`- Which routes/pages were changed? (look for route files, page components, href values)`);
-  parts.push(`- What new elements were added? (look for id="...", className="...", data-testid="...")`);
-  parts.push(`- What existing elements were modified? (changed class names, new props, structural changes)`);
-  parts.push(`\nSTEP 2 — Pick 1-4 screenshots based on what you found:`);
-  parts.push(`- Use the ACTUAL page URL where the changed component renders`);
-  parts.push(`- Use REAL id/class selectors from the diff code — not guesses`);
-  parts.push(`- If a component has id="rec-enabled" in the diff → use "#rec-enabled" as selector`);
-  parts.push(`- If a route file is at app/products/page.tsx → URL is likely ${appUrl}/products`);
-  parts.push(`\nSTEP 3 — Choose capture mode based on the change:`);
-  parts.push(`- New section/panel added → use "selector" on the container to zoom in on just that section`);
-  parts.push(`- Changed element in existing page → use "highlight" to mark it in context`);
-  parts.push(`- Entirely new page/route → omit selector/highlight for full viewport`);
-  parts.push(`- Feature is inside a tab/accordion/dropdown → use "clicks" to activate it before screenshotting`);
-  parts.push(`\nSTEP 4 — If the feature is inside a tab, drawer, or collapsible:`);
-  parts.push(`- Add a "clicks" array with the CSS selectors to click (in order) to reveal the content`);
-  parts.push(`- Example: to show the Recommendations tab → "clicks": ["[role='tab']:has-text('Recommendations')", "button[data-tab='recommendations']"]`);
-  parts.push(`- Example: to open an accordion → "clicks": ["button.accordion-trigger[data-value='shipping']"]`);
-  parts.push(`- Try multiple selector variants — only the first one that exists will execute`);
-  parts.push(`\nDescriptions must be SPECIFIC — the compose AI uses them to write matching text:`);
+  parts.push(`CRITICAL: You must derive every URL and CSS selector from the actual code diff above. DO NOT guess, invent, or assume paths.\n`);
+  parts.push(`STEP 1 — Extract route paths from the diff (REQUIRED before anything else):`);
+  parts.push(`Look for evidence of the actual URL paths in the diff. For Next.js apps, the file path IS the route:`);
+  parts.push(`  app/[lang]/cashback-settings/page.tsx → route is /{lang}/cashback-settings`);
+  parts.push(`  app/[lang]/storefront-settings/page.tsx → route is /{lang}/storefront-settings`);
+  parts.push(`  pages/settings/cashback.tsx → route is /settings/cashback`);
+  parts.push(`Also look for: href="...", <Link to="...">, navigate("..."), router.push("..."), path: "..." in route configs.`);
+  parts.push(`If the app uses a language prefix (like /en/), check the App URL to confirm the prefix, then apply it.`);
+  parts.push(`\nSTEP 2 — Extract real CSS selectors from the diff:`);
+  parts.push(`Look for: id="...", className="...", data-testid="...", aria-label="..." on changed elements.`);
+  parts.push(`Use those EXACT values as selectors. id="cashback-triggers" → selector "#cashback-triggers".`);
+  parts.push(`\nSTEP 3 — Map routes to full URLs:`);
+  parts.push(`App base URL: ${appUrl}`);
+  parts.push(`Combine base URL + extracted route path. Examples:`);
+  parts.push(`  Base: http://localhost:3001, Route: /en/cashback-settings → Full URL: http://localhost:3001/en/cashback-settings`);
+  parts.push(`  Base: http://localhost:3001, Route: /en/storefront-settings → Full URL: http://localhost:3001/en/storefront-settings`);
+  parts.push(`DO NOT add /dashboard/ or any other prefix that was not in the extracted route path.`);
+  parts.push(`\nSTEP 4 — Choose capture mode per screenshot:`);
+  parts.push(`ALWAYS use "highlight" to mark changed elements. NEVER use "selector" to crop/zoom.`);
+  parts.push(`The goal is to show the full page with a visible colored border drawn around the changed element.`);
+  parts.push(`This gives viewers full context while making the important part obvious.`);
+  parts.push(`- Changed element, new section, or new panel → use "highlight" with the element's CSS selector`);
+  parts.push(`- Entirely new page (nothing specific to highlight) → omit both selector and highlight for full viewport`);
+  parts.push(`- Feature inside tab/accordion → add "clicks" array to reveal the content first, then "highlight" the revealed element`);
+  parts.push(`- DO NOT use "selector" field at all — it crops the screenshot and loses context`);
+  parts.push(`\nDescriptions must be SPECIFIC — the compose AI uses them to write the post:`);
   parts.push(`- Bad: "The settings page"`);
-  parts.push(`- Good: "The storefront settings page showing the new Recommendations card with enable/disable toggle and display location switches"`);
+  parts.push(`- Good: "The cashback settings page at /en/cashback-settings showing the new trigger configuration panel"`);
   parts.push(`\nReturn 1-4 screenshot instructions. Each must have:`);
-  parts.push(`- "url": Full URL to navigate to`);
-  parts.push(`- "clicks": Array of CSS selectors to click before screenshotting (omit if nothing to activate)`);
-  parts.push(`- "selector": CSS selector from the actual diff code (omit for full viewport)`);
-  parts.push(`- "highlight": Array of CSS selectors to highlight (omit if using selector zoom)`);
-  parts.push(`- "description": What this screenshot shows and why it matters to the user`);
+  parts.push(`- "url": Full URL constructed from base URL + route extracted from the diff`);
+  parts.push(`- "clicks": Array of CSS selectors to click to reveal hidden content (omit if not needed)`);
+  parts.push(`- "highlight": Array of CSS selectors to draw a colored border around (use for changed/new elements)`);
+  parts.push(`- "description": What this screenshot shows and the exact URL you're navigating to`);
 
   parts.push(`\n## Output Format`);
   parts.push(`Return ONLY valid JSON, no markdown fences:`);
-  parts.push(`{"reasoning": "why these screenshots", "screenshots": [{"url": "...", "clicks": ["..."], "selector": "...", "highlight": ["..."], "description": "..."}]}`);
+  parts.push(`{"reasoning": "why these screenshots", "screenshots": [{"url": "...", "clicks": ["..."], "highlight": ["..."], "description": "..."}]}`);
 
   return { system, user: parts.join("\n") };
 }
@@ -316,7 +326,10 @@ function buildComposePrompt(
   textParts.push(`## Project`);
   textParts.push(`Name: ${ctx.projectName}`);
   if (ctx.version) textParts.push(`Version: ${ctx.version}`);
-  if (ctx.url) textParts.push(`URL: ${ctx.url}`);
+  if (ctx.url) {
+    textParts.push(`URL: ${ctx.url}`);
+    textParts.push(`IMPORTANT: Every post MUST end with a link to this URL. Use the exact URL above — do not invent or modify it. For Telegram use an HTML <a href="${ctx.url}"> tag. For Bluesky/X/Mastodon append it as plain text at the end. For blog/Medium embed it as a markdown link.`);
+  }
 
   if (ctx.description) {
     textParts.push(`\n## Description\n${ctx.description}`);
@@ -348,6 +361,15 @@ function buildComposePrompt(
 
   if (verbosity) {
     textParts.push(`\n## Verbosity\n${verbosity}`);
+  }
+
+  if (ctx.postStyle && ctx.postStyle !== "auto") {
+    textParts.push(`\n## Post Structure`);
+    if (ctx.postStyle === "single-narrative") {
+      textParts.push(`Write ONE cohesive story that ties all changes together. Do NOT list features separately as bullet points. Weave all changes into a single narrative arc with a clear beginning, middle, and end. The reader should feel like they're hearing about one meaningful improvement, not a changelog.`);
+    } else if (ctx.postStyle === "feature-list") {
+      textParts.push(`Structure the post as a list of distinct updates — one dedicated section or bullet per feature/commit. Each change gets its own paragraph or bullet point. Make it easy to skim: users should be able to jump to the feature they care about.`);
+    }
   }
 
   // Describe each screenshot
@@ -418,15 +440,31 @@ function buildComposePrompt(
   platformParts.push(`3. Be specific to THIS update — not "Product Updates" or "New Features Released".`);
   platformParts.push(`4. Keep under 100 characters.`);
 
+  const hasBluesky = platforms.some((p) => p.key === "bluesky");
   const keys = platforms.map((p) => {
-    const isLongForm = p.key === "blog" || p.key === "medium";
+    const isLongForm = p.key === "blog" || p.key === "medium" || p.key === "devto";
+    if (p.key === "bluesky") {
+      return `"bluesky": {"thread": [{"text": "hook post...", "imageIndex": 0}, {"text": "feature 1...", "imageIndex": 1}], "screenshots": [0, 1]}`;
+    }
     return isLongForm
       ? `"${p.key}": {"title": "...", "text": "...", "screenshots": [0, 1]}`
       : `"${p.key}": {"text": "...", "screenshots": [0]}`;
   }).join(", ");
+
   platformParts.push(`\n## Output Format`);
   platformParts.push(`Return ONLY valid JSON, no markdown fences:`);
   platformParts.push(`{${keys}}`);
+
+  if (hasBluesky) {
+    platformParts.push(`\n## Bluesky Thread Format`);
+    platformParts.push(`For Bluesky, output a "thread" array instead of a single "text" field.`);
+    platformParts.push(`Each item in the thread array is one post: {"text": "...", "imageIndex": N}`);
+    platformParts.push(`- "text": the post text, max 280 characters`);
+    platformParts.push(`- "imageIndex": index of the screenshot to attach (0-based), or omit if no image`);
+    platformParts.push(`When there are 2+ features or 2+ screenshots: use thread format (one post per feature).`);
+    platformParts.push(`When there is only 1 feature or no screenshots: "thread" array with a single item is fine.`);
+    platformParts.push(`The "screenshots" field on the Bluesky entry should list all screenshot indices used across the thread.`);
+  }
 
   contentParts.push({ type: "text", text: platformParts.join("\n") });
 
@@ -562,12 +600,13 @@ function parsePlanResponse(raw: string): ScreenshotPlan | null {
 function parseComposeResponse(
   raw: string,
   platformKeys: string[],
-): { texts: Map<string, string>; titles: Map<string, string>; selectedScreenshots: Map<string, number[]> } | null {
+): { texts: Map<string, string>; titles: Map<string, string>; selectedScreenshots: Map<string, number[]>; threads: Map<string, import("../adapters/types.js").ThreadPost[]> } | null {
   try {
     const parsed = JSON.parse(cleanJson(raw));
     const texts = new Map<string, string>();
     const titles = new Map<string, string>();
     const selectedScreenshots = new Map<string, number[]>();
+    const threads = new Map<string, import("../adapters/types.js").ThreadPost[]>();
 
     for (const key of platformKeys) {
       const entry = parsed[key];
@@ -578,9 +617,23 @@ function parseComposeResponse(
         texts.set(key, entry);
         selectedScreenshots.set(key, [0]);
       } else if (typeof entry === "object") {
-        if (typeof entry.text === "string" && entry.text.length > 0) {
+        // Bluesky thread format: { thread: [{text, imageIndex}, ...], screenshots: [...] }
+        if (Array.isArray(entry.thread) && entry.thread.length > 0) {
+          const threadPosts = entry.thread
+            .filter((t: unknown) => typeof (t as any)?.text === "string")
+            .map((t: any) => ({
+              text: t.text as string,
+              imageIndex: typeof t.imageIndex === "number" ? t.imageIndex : undefined,
+            }));
+          if (threadPosts.length > 0) {
+            threads.set(key, threadPosts);
+            // Store the root post text for display in the editor
+            texts.set(key, threadPosts.map((t: import("../adapters/types.js").ThreadPost) => t.text).join("\n\n---\n\n"));
+          }
+        } else if (typeof entry.text === "string" && entry.text.length > 0) {
           texts.set(key, entry.text);
         }
+
         if (typeof entry.title === "string" && entry.title.length > 0) {
           titles.set(key, entry.title);
         }
@@ -594,7 +647,7 @@ function parseComposeResponse(
     }
 
     if (texts.size === 0) return null;
-    return { texts, titles, selectedScreenshots };
+    return { texts, titles, selectedScreenshots, threads };
   } catch {
     return null;
   }
@@ -754,7 +807,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         // Skip failed/timed-out screenshots but continue with others
         const errMsg = err instanceof Error ? err.message : String(err);
         captureErrors.push(`[${i + 1}] ${instruction.url} — ${errMsg}`);
-        emit("screenshotting", `Warning: Failed to capture screenshot ${i + 1}: ${errMsg}`);
+        emit("screenshotting", `⚠ Screenshot ${i + 1} failed: ${errMsg}`);
       }
     }
   } finally {
@@ -762,10 +815,18 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   }
 
   if (captured.length === 0) {
-    const errorDetail = captureErrors.length > 0
-      ? "\nErrors:\n" + captureErrors.join("\n")
-      : "";
-    throw new Error("All screenshots failed to capture. Is the app running at " + appUrl + "?" + errorDetail);
+    const errorDetail = captureErrors.join("\n");
+    throw new Error(
+      `All ${finalPlan.screenshots.length} screenshot(s) failed.\n\n` +
+      `Errors:\n${errorDetail}\n\n` +
+      `This usually means the AI guessed the wrong URL paths. ` +
+      `Please review the screenshot plan above and correct the URLs before retrying.`
+    );
+  }
+
+  // Warn if some screenshots failed but others succeeded
+  if (captureErrors.length > 0) {
+    emit("screenshotting", `⚠ ${captureErrors.length} screenshot(s) failed, proceeding with ${captured.length} captured:\n${captureErrors.join("\n")}`);
   }
 
   emit("screenshotting", `Captured ${captured.length} screenshot(s)`);
@@ -809,13 +870,6 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     throw new Error("AI failed to compose posts from screenshots. Raw response:\n" + composeRaw.slice(0, 500));
   }
 
-  // Safety: truncate texts exceeding platform limits
-  for (const [key, adapter] of adapters) {
-    const text = composed.texts.get(key);
-    if (text && text.length > adapter.maxTextLength) {
-      composed.texts.set(key, text.slice(0, adapter.maxTextLength - 3) + "...");
-    }
-  }
 
   // Validate screenshot indices
   for (const [key, indices] of composed.selectedScreenshots) {
@@ -825,6 +879,15 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     );
   }
 
+  // Safety: truncate non-thread texts exceeding platform limits
+  for (const [key, adapter] of adapters) {
+    if (composed.threads.has(key)) continue;
+    const text = composed.texts.get(key);
+    if (text && text.length > adapter.maxTextLength) {
+      composed.texts.set(key, text.slice(0, adapter.maxTextLength - 3) + "...");
+    }
+  }
+
   emit("done", `Generated posts for ${composed.texts.size} platform(s) with ${captured.length} screenshot(s)`);
 
   return {
@@ -832,6 +895,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     titles: composed.titles,
     screenshots: captured,
     selectedScreenshots: composed.selectedScreenshots,
+    threads: composed.threads,
     plan: finalPlan,
     contentPlan: contentPlan ?? undefined,
   };
@@ -850,7 +914,7 @@ export async function reviseAgentContent(options: {
   diff?: string;
   systemPrompt?: string;
   language?: string;
-}): Promise<{ texts: Map<string, string>; titles: Map<string, string>; selectedScreenshots: Map<string, number[]> }> {
+}): Promise<{ texts: Map<string, string>; titles: Map<string, string>; selectedScreenshots: Map<string, number[]>; threads: Map<string, import("../adapters/types.js").ThreadPost[]> }> {
   const { aiOptions, context, adapters, agentResult, feedback, verbosity, diff, systemPrompt } = options;
 
   const platforms: PlatformConstraint[] = Array.from(adapters.entries()).map(([key, adapter]) => ({

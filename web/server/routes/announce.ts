@@ -3,9 +3,9 @@ import { createAdapters, filterAdapters } from "../../../src/core/engine.js";
 import { buildAiOptions } from "../../../src/core/ai-generator.js";
 import { generateWithAi } from "../../../src/core/ai-generator.js";
 import { runAgentLoop, reviseAgentContent } from "../../../src/core/ai-loop.js";
-import { getCommitRange, getDiffForRange, getProjectName } from "../../../src/core/changelog.js";
+import { getCommitRange, getDiffForRange, getUiDiff, getProjectName } from "../../../src/core/changelog.js";
 import { detectTemplate } from "../../../src/core/announce-templates.js";
-import type { AnnounceContext, Tone, Verbosity } from "../../../src/core/announce-templates.js";
+import type { AnnounceContext, Tone, Verbosity, PostStyle } from "../../../src/core/announce-templates.js";
 import type { PostOptions } from "../../../src/core/engine.js";
 import { createSession, getSession } from "../session-store.js";
 import type { SSEEvent, AnnounceStartRequest, PlanActionRequest, ReviseRequest, ScreenshotPlanActionRequest } from "../../shared/api-types.js";
@@ -212,8 +212,10 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
       projectName,
       description: body.description,
       changelog,
+      url: config.project?.url,
       tone,
       template,
+      postStyle: (body.postStyle ?? "auto") as PostStyle,
     };
 
     const aiOpts = buildAiOptions(config.ai);
@@ -222,11 +224,10 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
       // Agent loop path (screenshot-aware)
       emitPhase("analyzing", "Starting agent loop...");
 
-      const diff = await getDiffForRange({
-        commits: body.commits,
-        since: body.since,
-        tag: body.tag,
-      }).catch(() => null);
+      const [diff, uiDiff] = await Promise.all([
+        getDiffForRange({ commits: body.commits, since: body.since, tag: body.tag }).catch(() => null),
+        getUiDiff({ commits: body.commits, since: body.since, tag: body.tag }).catch(() => null),
+      ]);
 
       const result = await runAgentLoop({
         aiOptions: aiOpts,
@@ -235,6 +236,7 @@ async function runAnnounceBackground(sessionId: string, body: AnnounceStartReque
         adapters,
         verbosity: body.verbosity as Verbosity | undefined,
         diff: diff || undefined,
+        uiDiff: uiDiff || undefined,
         language: body.lang,
         auth: body.auth ? buildAuthOptions(body.auth) : undefined,
         onStatus: (phase, detail) => {
@@ -358,6 +360,7 @@ function buildAuthOptions(auth: ApiAuthOptions): CaptureAuthOptions {
 function buildContextFromSession(config: ReturnType<typeof loadConfig>, _feedback: string): AnnounceContext {
   return {
     projectName: "project",
+    url: config.project?.url,
     tone: "casual" as Tone,
     template: "update" as const,
   };

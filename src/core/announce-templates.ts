@@ -4,6 +4,7 @@ import type { Adapter } from "../adapters/types.js";
 export type Tone = "professional" | "casual" | "excited";
 export type TemplateType = "release" | "feature" | "bugfix" | "update";
 export type Verbosity = "brief" | "normal" | "detailed";
+export type PostStyle = "auto" | "single-narrative" | "feature-list";
 type PlatformTier = "short" | "medium" | "long" | "article";
 
 export interface AnnounceContext {
@@ -14,6 +15,7 @@ export interface AnnounceContext {
   url?: string;
   tone: Tone;
   template: TemplateType;
+  postStyle?: PostStyle;
 }
 
 function getTier(maxTextLength: number): PlatformTier {

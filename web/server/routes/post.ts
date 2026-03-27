@@ -12,14 +12,20 @@ export async function handlePost(req: Request): Promise<Response> {
   const postOptions: PostOptions = { only, exclude, dryRun };
   const adapters = filterAdapters(createAdapters(config, postOptions), postOptions);
 
-  // Collect per-platform images from session if available
+  // Collect per-platform images and threads from session if available
   const perPlatformImages: Record<string, Buffer[]> = {};
+  const perPlatformThread: PostOptions["perPlatformThread"] = {};
   if (sessionId) {
     const session = getSession(sessionId);
     if (session?.agentResult) {
       for (const [key] of adapters) {
         const images = getScreenshotsForPlatform(session.agentResult, key);
         if (images.length > 0) perPlatformImages[key] = images;
+      }
+      if (session.agentResult.threads.size > 0) {
+        for (const [key, thread] of session.agentResult.threads) {
+          perPlatformThread[key] = thread;
+        }
       }
     }
   }
@@ -31,6 +37,7 @@ export async function handlePost(req: Request): Promise<Response> {
       ...postOptions,
       perPlatformText: texts,
       perPlatformImages: Object.keys(perPlatformImages).length > 0 ? perPlatformImages : undefined,
+      perPlatformThread: Object.keys(perPlatformThread).length > 0 ? perPlatformThread : undefined,
     },
   );
 

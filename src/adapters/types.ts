@@ -1,3 +1,9 @@
+export interface ThreadPost {
+  text: string;
+  /** Index into the images array for this post (optional) */
+  imageIndex?: number;
+}
+
 export interface PostContent {
   text: string;
   images?: Buffer[];
@@ -5,6 +11,12 @@ export interface PostContent {
   html?: string;
   markdown?: string;
   language?: string;
+  /**
+   * Thread posts for platforms that support threading (Bluesky).
+   * When present, the adapter posts this as a reply chain instead of a single post.
+   * thread[0] is the root post, subsequent items are replies.
+   */
+  thread?: ThreadPost[];
 }
 
 export interface PostResult {

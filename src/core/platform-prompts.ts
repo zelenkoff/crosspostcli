@@ -12,11 +12,22 @@ export const PLATFORM_FORMATTING_RULES: Record<string, string> = {
   telegram:
     "Telegram post rules:\n" +
     "- Use ONE main screenshot that shows the most impactful change.\n" +
-    "- Structure with bold headers using HTML <b>tags</b>.\n" +
-    "- Use bullet points for feature lists.\n" +
-    "- Telegram supports HTML: <b>, <i>, <code>, <pre>, <a href>.\n" +
+    "- Telegram supports HTML: <b>, <i>, <code>, <pre>, <a href>. Use these for structure.\n" +
+    "- STRUCTURE (strictly follow this layout):\n" +
+    "    <b>🔖 Title or main theme</b>\n" +
+    "    (blank line)\n" +
+    "    Short 1-2 sentence intro explaining what changed for the user.\n" +
+    "    (blank line)\n" +
+    "    <b>What's new:</b>\n" +
+    "    • Feature one — explain in plain terms what users can now do\n" +
+    "    • Feature two — same\n" +
+    "    (blank line)\n" +
+    "    Closing sentence + link\n" +
+    "- BLANK LINES ARE REQUIRED between each section — Telegram renders them as visual spacing.\n" +
+    "- Never run all features into one dense paragraph with no breaks.\n" +
+    "- Each bullet on its own line, starting with •.\n" +
     "- Keep under 4096 chars. Lead with the most impactful change.\n" +
-    "- Write for a non-technical audience: explain what changed in terms of what users see and can do, not how it was built.\n" +
+    "- Write for a non-technical audience: what users see and can do, not how it was built.\n" +
     "- End with a real, clickable link — either to the blog post, product page, release notes, or the app itself. " +
     "Use an HTML <a href> tag. NEVER write a generic placeholder like 'Visit your dashboard' or 'Check it out' without an actual URL. " +
     "If a project URL is provided in the context, use it. If a blog platform is among the targets, link to where the blog post will be published.",
@@ -33,11 +44,16 @@ export const PLATFORM_FORMATTING_RULES: Record<string, string> = {
 
   bluesky:
     "Bluesky post rules:\n" +
-    "- Max 300 characters. Plain text.\n" +
-    "- Slightly more descriptive than Twitter but still concise.\n" +
-    "- One screenshot works best.\n" +
-    "- Focus on what users can do now that they couldn't before.\n" +
-    "- Keep it human and conversational — no marketing speak.",
+    "- Plain text only. No HTML. No markdown.\n" +
+    "- Each post in the thread is max 280 characters (leave room for breathing).\n" +
+    "- THREAD FORMAT (use when there are 2+ distinct features or screenshots):\n" +
+    "  Post 1 (root): Hook — the single most exciting thing about this update. One or two punchy sentences. No list.\n" +
+    "  Post 2+: One feature per post. Start with the feature name or emoji, then explain what users can NOW do in plain language. Attach the relevant screenshot to each post.\n" +
+    "  Last post: Closing — where to try it, link, or next steps.\n" +
+    "- SINGLE POST FORMAT (use when there is only 1 feature or no screenshots):\n" +
+    "  One concise post under 280 chars. Hook → what changed → link.\n" +
+    "- Each post must stand alone — no 'as mentioned above', no cross-references between posts.\n" +
+    "- Human and conversational tone. No marketing speak, no jargon.",
 
   mastodon:
     "Mastodon post rules:\n" +
@@ -59,6 +75,19 @@ export const PLATFORM_FORMATTING_RULES: Record<string, string> = {
     "- Write like you're explaining to a smart friend who doesn't read code.\n" +
     "- Open with a compelling hook, close with a specific link to try it.\n" +
     "- 600-1500 words. No code blocks, no jargon, no technical details.",
+
+  devto:
+    "DEV.to article rules:\n" +
+    "- Write for developers and technical makers, but keep it human and approachable.\n" +
+    "- Start with a # heading for the title, then a short intro paragraph that hooks the reader.\n" +
+    "- Structure: hook → what changed and why → walkthrough (one ## section per feature with screenshot) → closing link.\n" +
+    "- Use ## and ### markdown headers named after USER BENEFITS or outcomes.\n" +
+    "  Bad: 'New API'. Good: 'Instant Search — No More Waiting'.\n" +
+    "- Embed screenshots inline with ![description](./image-N.png) right after the paragraph describing each feature.\n" +
+    "- Short paragraphs (2-3 sentences). Conversational and direct tone.\n" +
+    "- You can mention stack/tech briefly but focus on what users can NOW do, not how it was built.\n" +
+    "- End with a specific link to try it or see the changelog.\n" +
+    "- 400-1200 words. No walls of text.",
 
   blog:
     "Blog post rules:\n" +

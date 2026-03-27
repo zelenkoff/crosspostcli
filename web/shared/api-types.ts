@@ -44,6 +44,7 @@ export interface AnnounceStartRequest {
   tone?: string;
   verbosity?: string;
   lang?: string;
+  postStyle?: "auto" | "single-narrative" | "feature-list";
 }
 
 export interface AnnounceStartResponse {

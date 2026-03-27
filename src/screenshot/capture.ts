@@ -523,6 +523,62 @@ export class BrowserSession {
     this.authenticated = true;
   }
 
+  /**
+   * Check if the browser has been redirected to a login page.
+   * If so — and we have login credentials — re-authenticate and navigate back to targetUrl.
+   * Called both immediately after goto() and after the render delay, because some apps
+   * do a client-side session check after initial render and redirect mid-wait.
+   */
+  private async _recoverIfRedirectedToLogin(targetUrl: string): Promise<void> {
+    const currentUrl = this.page.url();
+    const isLoginPage =
+      currentUrl.includes("/login") ||
+      currentUrl.includes("/signin") ||
+      currentUrl.includes("/sign-in") ||
+      currentUrl.includes("/auth/login");
+
+    if (!isLoginPage) return;
+
+    if (!this.options.auth?.login) {
+      throw new Error(
+        `Redirected to login page at ${currentUrl} while trying to reach ${targetUrl}. ` +
+        `The page requires authentication — configure auth credentials.`
+      );
+    }
+
+    process.stderr.write(
+      `[crosspost] Auth redirect detected: ${targetUrl} → ${currentUrl}. Re-authenticating...\n`
+    );
+
+    // Force re-login (session cookie expired or was invalidated)
+    this.authenticated = false;
+    await this.authenticate();
+
+    // Navigate back to the target
+    const retryResponse = await this.page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    const retryStatus = retryResponse?.status?.() ?? 200;
+    if (retryStatus >= 400) {
+      throw new Error(
+        `Page returned HTTP ${retryStatus} at ${targetUrl} after re-authentication. ` +
+        `The URL is likely wrong — check the path in the screenshot plan.`
+      );
+    }
+
+    const afterReauthUrl = this.page.url();
+    if (
+      afterReauthUrl.includes("/login") ||
+      afterReauthUrl.includes("/signin") ||
+      afterReauthUrl.includes("/sign-in")
+    ) {
+      throw new Error(
+        `Still on login page after re-authentication (${afterReauthUrl}). ` +
+        `Check your auth credentials.`
+      );
+    }
+
+    process.stderr.write(`[crosspost] Re-authenticated successfully, now at ${this.page.url()}\n`);
+  }
+
   /** Navigate to a URL and take a screenshot, reusing the same browser window */
   async capture(opts: {
     url: string;
@@ -543,11 +599,54 @@ export class BrowserSession {
     // Authenticate on first use
     await this.authenticate();
 
-    await this.page.goto(opts.url, { waitUntil: "networkidle", timeout: 30_000 });
+    // Use domcontentloaded so we land on the page before the app's JS session-checks
+    // fire over the network (networkidle waits for those, which can trigger auth redirects
+    // before we even start our render delay).
+    const response = await this.page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
 
+    // Detect HTTP error responses (4xx, 5xx)
+    const httpStatus = response?.status?.() ?? 200;
+    if (httpStatus >= 400) {
+      throw new Error(
+        `Page returned HTTP ${httpStatus} at ${opts.url}. ` +
+        `The URL is likely wrong — check the path in the screenshot plan and correct it.`
+      );
+    }
+
+    // Check for immediate auth redirect (server-side redirect on navigation)
+    await this._recoverIfRedirectedToLogin(opts.url);
+
+    // Wait for JS frameworks to finish rendering
     const delay = opts.delay ?? this.options.delay ?? 3000;
     if (delay > 0) {
       await this.page.waitForTimeout(delay);
+    }
+
+    // Check again after the delay — some apps run a client-side session check after render
+    // that can redirect to login during our wait period.
+    await this._recoverIfRedirectedToLogin(opts.url);
+
+    // Detect real error pages (Next.js runtime errors, React crash boundaries, 404s)
+    // NOTE: do NOT flag the Next.js error overlay here — it may be a dev-mode overlay
+    // for an unrelated error. Only flag hard 404/500 pages.
+    const pageError = await this.page.evaluate(() => {
+      const doc = (globalThis as any).document;
+      // Generic: page title says "404" or "500" (not login-related)
+      const title = (doc.title ?? "").trim();
+      if (/^\s*(404|500)\b/i.test(title)) return `Page title indicates an error: "${title}"`;
+      // Body contains only a short error string (no real app content)
+      const bodyText = (doc.body?.innerText ?? "").trim();
+      if (bodyText.length < 80 && /\b(404|not found|cannot get|page not found)\b/i.test(bodyText)) {
+        return `Page appears to be a 404: "${bodyText.slice(0, 80)}"`;
+      }
+      return null;
+    }).catch(() => null);
+
+    if (pageError) {
+      throw new Error(
+        `${pageError} at ${opts.url}. ` +
+        `The URL is likely wrong — check the path in the screenshot plan and correct it.`
+      );
     }
 
     // Click elements (e.g. to activate a tab before screenshotting)

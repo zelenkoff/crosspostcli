@@ -8,6 +8,11 @@ interface ComposeFormProps {
 
 const TONES = ["casual", "professional", "excited"];
 const VERBOSITIES = ["brief", "normal", "detailed"];
+const POST_STYLES: { value: string; label: string; hint: string }[] = [
+  { value: "auto", label: "auto", hint: "AI decides" },
+  { value: "single-narrative", label: "narrative", hint: "one cohesive story" },
+  { value: "feature-list", label: "feature list", hint: "per-feature breakdown" },
+];
 
 export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
   const [description, setDescription] = useState("");
@@ -16,6 +21,7 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
   const [appUrl, setAppUrl] = useState("");
   const [fromGit, setFromGit] = useState(false);
   const [lang, setLang] = useState("");
+  const [postStyle, setPostStyle] = useState("auto");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Auth fields
@@ -49,6 +55,7 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
       tone,
       verbosity,
       lang: lang || undefined,
+      postStyle: postStyle as AnnounceStartRequest["postStyle"],
     });
   };
 
@@ -178,6 +185,24 @@ export function ComposeForm({ onSubmit, disabled }: ComposeFormProps) {
               <option key={v} value={v}>{v}</option>
             ))}
           </select>
+        </div>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Post structure</label>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {POST_STYLES.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              className={`platform-chip${postStyle === s.value ? " platform-chip--active" : ""}`}
+              onClick={() => setPostStyle(s.value)}
+              disabled={disabled}
+              title={s.hint}
+            >
+              {s.label}
+            </button>
+          ))}
         </div>
       </div>
 
