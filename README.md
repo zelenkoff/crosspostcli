@@ -2,7 +2,7 @@
 
 Cross-platform content publishing from the terminal. Bring your own API keys. No server. No subscription.
 
-Post to **Telegram**, **X (Twitter)**, **Bluesky**, **Mastodon**, **Discord**, **Medium**, and your **blog** — all at once.
+Post to **Telegram**, **X (Twitter)**, **Bluesky**, **Mastodon**, **DEV.to**, and your **blog** — all at once.
 
 ## Features
 
@@ -72,7 +72,7 @@ crosspost "Check this out" --image photo.png
 crosspost "Hello Fediverse" --only mastodon,bluesky
 
 # Exclude a platform
-crosspost "Not for Discord" --exclude discord
+crosspost "Not for Mastodon" --exclude mastodon
 
 # Read text from a file
 crosspost --from post.txt
@@ -122,7 +122,7 @@ crosspost screenshot --setup
 
 ### Announce — Smart Content Generation
 
-Generate platform-tailored announcements from git history or a description. Produces short tweets for X/Bluesky, medium posts for Mastodon, full changelogs for Telegram/Discord, and markdown articles for Medium/Blog — all from a single command.
+Generate platform-tailored announcements from git history or a description. Produces short tweets for X/Bluesky, medium posts for Mastodon, full changelogs for Telegram, and markdown articles for Blog/DEV.to — all from a single command.
 
 ```bash
 # Announce from a description
@@ -139,6 +139,9 @@ crosspost announce --from-git --commits "v1.0..v1.1"
 
 # Preview without posting
 crosspost announce "New release" --dry-run
+
+# Open browser-based preview editor before posting
+crosspost announce --from-git --tag v1.0 --web
 
 # Screenshot the app and include it
 crosspost announce --from-git --tag v1.0 \
@@ -162,17 +165,32 @@ crosspost announce --from-git \
 # Control the tone
 crosspost announce "Big update" --tone excited --version "3.0"
 
+# Post in a specific language (routes to matching channels)
+crosspost announce "Новая версия" --lang ru
+
 # Skip confirmation (for CI)
 crosspost announce --from-git --tag v1.0 --no-confirm --json
+
+# Use a custom AI system prompt
+crosspost announce --from-git --system-prompt "Write in a very technical style"
 ```
 
 **Source options:** `--from-git`, `--commits <range>`, `--since <date>`, `--tag <tag>`, `--from <file>`
 
 **Discovery options:** `--discover <url>`, `--discover-keywords <words...>`, `--discover-max-pages <n>`, `--discover-device <device>`
 
-**Content options:** `--project-name <name>`, `--version <ver>`, `--url <url>`, `--tone` (`professional` | `casual` | `excited`), `--template` (`release` | `feature` | `bugfix` | `update`)
+**Content options:** `--project-name <name>`, `--version <ver>`, `--url <url>`, `--tone` (`professional` | `casual` | `excited`), `--template` (`release` | `feature` | `bugfix` | `update`), `--verbosity` (`brief` | `normal` | `detailed`), `--lang <code>`
 
-The `--discover` flag uses Playwright to crawl your running app (up to 8 pages by default), searches for UI elements matching your changelog keywords, highlights them with a red outline, and takes screenshots. The best screenshot is automatically attached to your posts. Keywords are extracted from commit subjects — or you can provide extra ones with `--discover-keywords`.
+**AI options:** `--ai-provider` (`anthropic` | `openai`), `--ai-model <model>`, `--system-prompt <prompt>`, `--system-prompt-file <path>`, `--no-ai`
+
+**Discovery auth options** (for protected apps):
+- `--auth-storage-state <path>` — Playwright saved browser session
+- `--auth-user / --auth-pass` — HTTP Basic Auth
+- `--auth-bearer <token>` — Bearer token
+- `--auth-header <key:value>` — Custom HTTP headers (repeatable)
+- `--auth-login-url / --auth-login-fields / --auth-login-submit` — Form-based login
+
+The `--discover` flag uses Playwright to crawl your running app (up to 8 pages by default), searches for UI elements matching your changelog keywords, highlights them with a colored border, and takes screenshots. Keywords are extracted from commit subjects — or you can provide extra ones with `--discover-keywords`.
 
 The command auto-detects the template type from your commits: feature-only changelogs get a "feature" template, fix-only get "bugfix", mixed get "release". Content is automatically sized per platform — a 280-char tweet, a 500-char toot, a full changelog for Telegram, and a markdown article for your blog.
 
@@ -200,9 +218,10 @@ The command auto-detects the template type from your commits: feature-only chang
 | X (Twitter) | 280 | Yes | Plain |
 | Bluesky | 300 | Yes | Rich text facets |
 | Mastodon | 500 | Yes | Plain |
-| Discord | 2,000 | Yes | Markdown |
-| Medium | 100,000 | No | HTML / Markdown |
+| DEV.to | 100,000 | No* | Markdown |
 | Blog (Git) | 100,000 | Yes | Markdown / MDX |
+
+*DEV.to has no public image upload API. Images are omitted from posts.
 
 ### Platform Setup
 
@@ -214,11 +233,9 @@ Each platform requires its own API credentials. Run `crosspost init` for a guide
 
 **Bluesky** — Handle (e.g. `you.bsky.social`) + [app password](https://bsky.app/settings/app-passwords)
 
-**Mastodon** — Instance URL + access token from your instance's developer settings
+**Mastodon** — Instance URL (e.g. `https://mastodon.social`) + access token from your instance's developer settings
 
-**Discord** — [Webhook URL(s)](https://support.discord.com/hc/en-us/articles/228383668) for your channels
-
-**Medium** — [Integration token](https://medium.com/me/settings/security) from your security settings
+**DEV.to** — API key from [dev.to/settings/extensions](https://dev.to/settings/extensions)
 
 **Blog** — Path to your blog's content directory, file type (md/mdx), optional git push and deploy command
 
@@ -235,6 +252,12 @@ crosspost config set platforms.telegram.bot_token "your-token"
 
 # Get a value
 crosspost config get platforms.telegram.enabled
+
+# Disable a platform
+crosspost config set platforms.x.enabled false
+
+# Set your project URL (appended to all posts)
+crosspost config set project.url https://yourapp.com
 ```
 
 ## MCP Server
@@ -276,6 +299,9 @@ src/
   screenshot/      — Playwright integration (lazy-loaded)
   mcp/             — MCP server for AI agents
   utils/           — Shared utilities
+web/
+  client/          — React web UI (preview editor)
+  server/          — Bun API server
 ```
 
 ### Development
