@@ -1,8 +1,9 @@
 /**
- * AI Agentic Loop — Two-pass screenshot-aware content generation.
+ * AI Agentic Loop — Three-pass screenshot-aware content generation.
  *
- * Pass 1 (Plan):  AI sees changelog/context/app URL → returns screenshot instructions
- * Pass 2 (Compose): AI sees the captured screenshots (vision) → writes posts referencing them
+ * Pass 1 (Plan):    AI sees changelog/context/app URL → returns screenshot instructions
+ * Pass 1.5 (Review): AI reviews captured screenshots → KEEP / RETAKE / DROP each one
+ * Pass 2 (Compose): AI sees approved screenshots (vision) → writes posts referencing them
  *
  * This replaces the disconnected discover→screenshot→generate pipeline with a single
  * coherent AI-driven flow where the same model decides what to capture AND writes
@@ -43,6 +44,17 @@ export interface CapturedScreenshot {
   buffer: Buffer;
   width: number;
   height: number;
+}
+
+export type ScreenshotVerdictAction = "KEEP" | "RETAKE" | "DROP";
+
+export interface ScreenshotVerdict {
+  /** 0-based index into the CapturedScreenshot array */
+  index: number;
+  action: ScreenshotVerdictAction;
+  reason: string;
+  /** Only present when action === "RETAKE" — corrected capture instruction */
+  correctedInstruction?: ScreenshotInstruction;
 }
 
 /** Content plan produced by the analysis phase */
@@ -480,6 +492,68 @@ function buildComposePrompt(
   return { system, userContent: contentParts };
 }
 
+function buildReviewPrompt(screenshots: CapturedScreenshot[]): {
+  system: string;
+  userContent: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
+  >;
+} {
+  const system =
+    "You are a screenshot quality reviewer for a social media post generation tool. " +
+    "You receive screenshots taken from a live web app and must decide whether each one " +
+    "is suitable for use in a product announcement post. " +
+    "Protect against wasted effort: only pass through screenshots that genuinely show " +
+    "the intended UI feature in a usable state.";
+
+  const contentParts: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
+  > = [];
+
+  contentParts.push({
+    type: "text",
+    text:
+      `You captured ${screenshots.length} screenshot(s) for a product announcement.\n` +
+      `Review each one and decide: KEEP, RETAKE, or DROP.\n\n` +
+      `Rules:\n` +
+      `- KEEP: the screenshot shows the intended feature clearly. Page loaded, content visible, no error states.\n` +
+      `- RETAKE: right area but fixable problem (wrong tab open, wrong element highlighted, spinner still showing). Provide corrected instructions.\n` +
+      `- DROP: fundamentally unusable (404, login wall, blank page, captcha, completely unrelated page).\n\n` +
+      `For RETAKE, provide corrected capture instructions. Fix url/clicks/highlight/description as needed. Never use selector — use highlight only.\n\n` +
+      `Here are the ${screenshots.length} screenshot(s) with their intended descriptions:`,
+  });
+
+  for (let i = 0; i < screenshots.length; i++) {
+    const s = screenshots[i];
+    contentParts.push({
+      type: "text",
+      text: `\nScreenshot ${i + 1} (index ${i}): ${s.instruction.description}\nURL captured: ${s.instruction.url}`,
+    });
+    contentParts.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: "image/png",
+        data: s.buffer.toString("base64"),
+      },
+    });
+  }
+
+  contentParts.push({
+    type: "text",
+    text:
+      `\nReturn ONLY valid JSON, no markdown fences:\n` +
+      `{"verdicts": [\n` +
+      `  {"index": 0, "action": "KEEP", "reason": "feature panel is clearly visible"},\n` +
+      `  {"index": 1, "action": "RETAKE", "reason": "accordion not expanded", "correctedInstruction": {"url": "...", "clicks": [".tab-trigger"], "highlight": [".panel"], "description": "..."}},\n` +
+      `  {"index": 2, "action": "DROP", "reason": "404 page"}\n` +
+      `]}`,
+  });
+
+  return { system, userContent: contentParts };
+}
+
 // ── AI Callers ─────────────────────────────────────────────────────────
 
 async function callAnthropicPlan(
@@ -560,6 +634,58 @@ async function callOpenAICompose(
   const response = await client.chat.completions.create({
     model: options.model ?? "gpt-4o",
     max_tokens: 8192,
+    messages: [
+      { role: "system", content: prompt.system },
+      { role: "user", content: contentParts },
+    ],
+  });
+  return response.choices[0]?.message?.content ?? "";
+}
+
+async function callAnthropicReview(
+  prompt: ReturnType<typeof buildReviewPrompt>,
+  options: AiGenerateOptions,
+): Promise<string> {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey: options.apiKey });
+  const response = await client.messages.create({
+    model: options.model ?? "claude-sonnet-4-20250514",
+    max_tokens: 1024,
+    system: prompt.system,
+    messages: [{
+      role: "user",
+      content: prompt.userContent as Array<
+        | { type: "text"; text: string }
+        | { type: "image"; source: { type: "base64"; media_type: "image/png"; data: string } }
+      >,
+    }],
+  });
+  const block = response.content[0];
+  return block.type === "text" ? block.text : "";
+}
+
+async function callOpenAIReview(
+  prompt: ReturnType<typeof buildReviewPrompt>,
+  options: AiGenerateOptions,
+): Promise<string> {
+  const { default: OpenAI } = await import("openai");
+  const client = new OpenAI({ apiKey: options.apiKey });
+
+  const contentParts: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [];
+  for (const part of prompt.userContent) {
+    if (part.type === "text") {
+      contentParts.push({ type: "text", text: part.text });
+    } else if (part.type === "image") {
+      contentParts.push({
+        type: "image_url",
+        image_url: { url: `data:${part.source.media_type};base64,${part.source.data}` },
+      });
+    }
+  }
+
+  const response = await client.chat.completions.create({
+    model: options.model ?? "gpt-4o",
+    max_tokens: 1024,
     messages: [
       { role: "system", content: prompt.system },
       { role: "user", content: contentParts },
@@ -675,6 +801,48 @@ function parseAnalysisResponse(raw: string): ContentPlan | null {
       screenshotStrategy: typeof parsed.screenshotStrategy === "string" ? parsed.screenshotStrategy : "",
       suggestedTone: typeof parsed.suggestedTone === "string" ? parsed.suggestedTone : "",
     };
+  } catch {
+    return null;
+  }
+}
+
+function parseReviewResponse(raw: string, count: number): ScreenshotVerdict[] | null {
+  try {
+    const parsed = JSON.parse(cleanJson(raw));
+    if (!Array.isArray(parsed.verdicts)) return null;
+
+    const validActions = new Set<string>(["KEEP", "RETAKE", "DROP"]);
+    const verdicts: ScreenshotVerdict[] = [];
+
+    for (const v of parsed.verdicts) {
+      if (typeof v.index !== "number" || !validActions.has(v.action)) continue;
+      if (v.index < 0 || v.index >= count) continue;
+
+      const verdict: ScreenshotVerdict = {
+        index: v.index,
+        action: v.action as ScreenshotVerdictAction,
+        reason: typeof v.reason === "string" ? v.reason : "",
+      };
+
+      if (v.action === "RETAKE" && v.correctedInstruction && typeof v.correctedInstruction.url === "string") {
+        verdict.correctedInstruction = {
+          url: v.correctedInstruction.url,
+          description: typeof v.correctedInstruction.description === "string"
+            ? v.correctedInstruction.description
+            : verdict.reason,
+          highlight: Array.isArray(v.correctedInstruction.highlight)
+            ? v.correctedInstruction.highlight.filter((h: unknown) => typeof h === "string")
+            : undefined,
+          clicks: Array.isArray(v.correctedInstruction.clicks)
+            ? v.correctedInstruction.clicks.filter((c: unknown) => typeof c === "string")
+            : undefined,
+        };
+      }
+
+      verdicts.push(verdict);
+    }
+
+    return verdicts.length > 0 ? verdicts : null;
   } catch {
     return null;
   }
@@ -848,6 +1016,86 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
   emit("screenshotting", `Captured ${captured.length} screenshot(s)`);
 
+  // ── Pass 1.5: Screenshot Review ────────────────────────────────────
+  // Reviews all screenshots in a single vision call. Bad ones get one retake
+  // attempt with corrected instructions, then dropped if still failing.
+  // Non-fatal: any error falls back to using all captured screenshots.
+
+  let approvedScreenshots: CapturedScreenshot[] = captured;
+
+  if (captured.length > 0) {
+    try {
+      emit("screenshotting", `Reviewing ${captured.length} screenshot(s) for quality...`);
+
+      const reviewPrompt = buildReviewPrompt(captured);
+      const reviewRaw = aiOptions.provider === "openai"
+        ? await callOpenAIReview(reviewPrompt, aiOptions)
+        : await callAnthropicReview(reviewPrompt, aiOptions);
+
+      const verdicts = parseReviewResponse(reviewRaw, captured.length);
+
+      if (verdicts) {
+        const verdictMap = new Map<number, ScreenshotVerdict>();
+        for (const v of verdicts) verdictMap.set(v.index, v);
+
+        const kept: CapturedScreenshot[] = [];
+        const retakeQueue: Array<{ originalIndex: number; instruction: ScreenshotInstruction }> = [];
+
+        for (let i = 0; i < captured.length; i++) {
+          const verdict = verdictMap.get(i) ?? { index: i, action: "KEEP" as const, reason: "" };
+          if (verdict.action === "KEEP") {
+            emit("screenshotting", `Screenshot ${i + 1}: KEEP — ${verdict.reason}`);
+            kept.push(captured[i]);
+          } else if (verdict.action === "RETAKE" && verdict.correctedInstruction) {
+            emit("screenshotting", `Screenshot ${i + 1}: RETAKE — ${verdict.reason}`);
+            retakeQueue.push({ originalIndex: i, instruction: verdict.correctedInstruction });
+          } else {
+            emit("screenshotting", `Screenshot ${i + 1}: DROP — ${verdict.reason}`);
+          }
+        }
+
+        if (retakeQueue.length > 0) {
+          emit("screenshotting", `Retaking ${retakeQueue.length} screenshot(s) with corrected instructions...`);
+          const retakeSession = new BrowserSession({ ...options.screenshotDefaults, auth: options.auth });
+          try {
+            await retakeSession.init();
+            for (const { originalIndex, instruction } of retakeQueue) {
+              emit("screenshotting", `Retaking screenshot ${originalIndex + 1}: ${instruction.description}`);
+              try {
+                const RETAKE_TIMEOUT = 45_000;
+                const result = await Promise.race([
+                  retakeSession.capture({
+                    url: instruction.url,
+                    selector: instruction.selector,
+                    highlight: instruction.highlight,
+                    clicks: instruction.clicks,
+                    hide: options.screenshotDefaults?.hide,
+                  }),
+                  new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error(`Retake timed out after ${RETAKE_TIMEOUT / 1000}s`)), RETAKE_TIMEOUT),
+                  ),
+                ]);
+                kept.push({ instruction, buffer: result.buffer, width: result.width, height: result.height });
+                emit("screenshotting", `Retake ${originalIndex + 1}: captured successfully`);
+              } catch (err) {
+                emit("screenshotting", `⚠ Retake ${originalIndex + 1} failed, dropping: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+          } finally {
+            await retakeSession.close();
+          }
+        }
+
+        approvedScreenshots = kept;
+        emit("screenshotting", `Review complete: ${approvedScreenshots.length}/${captured.length} screenshot(s) approved`);
+      } else {
+        emit("screenshotting", `⚠ Screenshot review parse failed, proceeding with all ${captured.length} screenshot(s)`);
+      }
+    } catch (err) {
+      emit("screenshotting", `⚠ Screenshot review failed (${err instanceof Error ? err.message : String(err)}), proceeding with all ${captured.length} screenshot(s)`);
+    }
+  }
+
   // ── Pass 2: Compose posts with vision ──────────────────────────────
 
   emit("composing", "AI is viewing screenshots and writing posts...");
@@ -869,7 +1117,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   }
 
   const composePrompt = buildComposePrompt(
-    context, platforms, captured, verbosity, diff, contentPlan ?? undefined,
+    context, platforms, approvedScreenshots, verbosity, diff, contentPlan ?? undefined,
     options.systemPrompt, options.language,
     Object.keys(perPlatformLanguage).length > 0 ? perPlatformLanguage : undefined,
   );
@@ -892,7 +1140,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   for (const [key, indices] of composed.selectedScreenshots) {
     composed.selectedScreenshots.set(
       key,
-      indices.filter((i) => i >= 0 && i < captured.length),
+      indices.filter((i) => i >= 0 && i < approvedScreenshots.length),
     );
   }
 
@@ -905,12 +1153,12 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     }
   }
 
-  emit("done", `Generated posts for ${composed.texts.size} platform(s) with ${captured.length} screenshot(s)`);
+  emit("done", `Generated posts for ${composed.texts.size} platform(s) with ${approvedScreenshots.length} screenshot(s)`);
 
   return {
     texts: composed.texts,
     titles: composed.titles,
-    screenshots: captured,
+    screenshots: approvedScreenshots,
     selectedScreenshots: composed.selectedScreenshots,
     threads: composed.threads,
     plan: finalPlan,
