@@ -17,7 +17,13 @@ export class TelegramAdapter implements Adapter {
   }
 
   formatText(text: string): string {
-    return text.slice(0, this.maxTextLength);
+    // Convert any markdown bold/italic to HTML (AI sometimes generates markdown despite instructions)
+    const html = text
+      .replace(/\*\*(.+?)\*\*/gs, "<b>$1</b>")
+      .replace(/\*(.+?)\*/gs, "<i>$1</i>")
+      .replace(/__(.+?)__/gs, "<b>$1</b>")
+      .replace(/_(.+?)_/gs, "<i>$1</i>");
+    return html.slice(0, this.maxTextLength);
   }
 
   async validate(): Promise<boolean> {

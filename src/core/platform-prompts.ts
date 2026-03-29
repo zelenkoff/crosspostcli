@@ -12,7 +12,8 @@ export const PLATFORM_FORMATTING_RULES: Record<string, string> = {
   telegram:
     "Telegram post rules:\n" +
     "- Use ONE main screenshot that shows the most impactful change.\n" +
-    "- Telegram supports HTML: <b>, <i>, <code>, <pre>, <a href>. Use these for structure.\n" +
+    "- Telegram supports HTML ONLY: <b>, <i>, <code>, <pre>, <a href>. Use these for structure.\n" +
+    "- NEVER use **markdown bold**, *italic*, or __underscores__ — these are NOT rendered by Telegram and will appear as literal asterisks/underscores.\n" +
     "- STRUCTURE (strictly follow this layout):\n" +
     "    <b>🔖 Title or main theme</b>\n" +
     "    (blank line)\n" +
@@ -131,7 +132,7 @@ export const DEFAULT_COMPOSE_SYSTEM_PROMPT =
   "- SCREENSHOT PLACEMENT: After you describe a feature, immediately embed the screenshot that shows it: ![brief description](./image-N.png). Distribute throughout — never pile at top or bottom.\n" +
   "- NO code blocks. NO technical explanations. NO mention of libraries, frameworks, or engineering decisions.\n" +
   "- Target 600-1200 words. Every section must answer 'so what?' from the user's perspective.\n\n" +
-  "FOR TELEGRAM: End with a real clickable link using HTML <a href> tags. Never write 'Check it out' without a specific URL.\n\n" +
+  "FOR TELEGRAM: Use HTML tags ONLY — <b>, <i>, <a href>. NEVER use **markdown** or __underscores__. Markdown syntax is not rendered by Telegram and will appear as raw asterisks. End with a real clickable <a href> link.\n\n" +
   "FOR SHORT PLATFORMS (X, Bluesky, Mastodon): One or two sentences about what's new, in plain language. One screenshot maximum.\n\n" +
   "You return JSON only. Never return markdown code fences — just valid JSON.";
 

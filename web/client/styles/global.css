@@ -841,12 +841,14 @@ html, body, #root {
 
 .screenshot-thumb {
   position: relative;
+  display: block;
   border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--preview-border);
   background: var(--preview-bg);
   aspect-ratio: 16 / 10;
   cursor: pointer;
+  text-decoration: none;
   transition: border-color var(--transition), transform var(--transition);
 }
 

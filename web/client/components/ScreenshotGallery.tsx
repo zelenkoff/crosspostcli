@@ -14,14 +14,21 @@ export function ScreenshotGallery({ sessionId, indices }: ScreenshotGalleryProps
       <div className="screenshot-gallery__title">Screenshots ({indices.length})</div>
       <div className="screenshot-gallery__grid">
         {indices.map((idx) => (
-          <div key={idx} className="screenshot-thumb">
+          <a
+            key={idx}
+            className="screenshot-thumb"
+            href={screenshotUrl(sessionId, idx)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open screenshot ${idx + 1} full size`}
+          >
             <span className="screenshot-thumb__index">#{idx + 1}</span>
             <img
               src={screenshotUrl(sessionId, idx)}
               alt={`Screenshot ${idx + 1}`}
               loading="lazy"
             />
-          </div>
+          </a>
         ))}
       </div>
     </div>
